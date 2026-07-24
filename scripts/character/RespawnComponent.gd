@@ -24,7 +24,7 @@ func _ready() -> void:
 ## (explosion spawned, rpc_died broadcast).
 func begin_respawn_countdown() -> void:
 	_character.visible = false
-	_character.set_collision_layer_value(1, false)
+	_character.set_collision_layer_value(2, false)
 	_character.set_collision_mask_value(1, false)
 	_timer.start()
 
@@ -36,5 +36,5 @@ func _do_respawn() -> void:
 	_health.reset()
 	_head_growth.reset()
 	_character.visible = true
-	_character.set_collision_layer_value(1, true)
+	_character.set_collision_layer_value(2, true)
 	_character.set_collision_mask_value(1, true)

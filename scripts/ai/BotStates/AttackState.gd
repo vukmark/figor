@@ -11,7 +11,9 @@ func physics_update(delta: float) -> InputCommand:
 	var direction: Vector3 = target.global_transform.origin - bot_ai.character.global_transform.origin
 	direction.y = 0.0
 	_steer_yaw(cmd, direction, delta)
-	cmd.fire_pressed = bot_ai.has_line_of_sight(target)
+	# Bots aren't perfect shots — this keeps fights from being instant even
+	# with unbroken line of sight, on top of the weapon's own fire cooldown.
+	cmd.fire_pressed = Constants.BOTS_CAN_FIRE and bot_ai.has_line_of_sight(target) and randf() < bot_ai.accuracy
 	return cmd
 
 

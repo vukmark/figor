@@ -3,14 +3,14 @@ extends CharacterBody3D
 
 @onready var visual_root: Node3D = $VisualRoot
 @onready var camera_rig: Node3D = $CameraRig
-@onready var spring_arm: SpringArm3D = $CameraRig/SpringArm3D
-@onready var camera: Camera3D = $CameraRig/SpringArm3D/Camera3D
+@onready var camera: Camera3D = $CameraRig/Camera3D
 @onready var weapon_mount: Node3D = $WeaponMount
 @onready var health: HealthComponent = $HealthComponent
 @onready var head_growth: HeadGrowth = $HeadGrowth
 @onready var respawn: RespawnComponent = $RespawnComponent
 @onready var input_slot: Node = $InputProviderSlot
 @onready var nav_agent: NavigationAgent3D = $NavigationAgent3D
+@onready var head_hitbox: CollisionShape3D = $HeadHitbox
 
 var input_provider: InputProvider
 var knockback_velocity := Vector3.ZERO
@@ -28,6 +28,14 @@ func _ready() -> void:
 	var head_node := _find_node_named(visual_root, "head")
 	head_growth.set_head_node(head_node)
 
+	# The shape resource is shared across every Character.tscn instance by
+	# default (sub-resources aren't auto-duplicated per instance) — since
+	# each character's hitbox radius grows independently with its own head,
+	# it must be a private copy, not a reference every character would fight
+	# over. Position is tracked continuously by HeadGrowth as the head grows.
+	head_hitbox.shape = head_hitbox.shape.duplicate()
+	head_growth.set_head_hitbox(head_hitbox)
+
 	_update_camera_active()
 
 
@@ -44,7 +52,12 @@ func _bind_input_provider(provider: Node) -> void:
 
 
 func _update_camera_active() -> void:
-	camera.current = input_provider is PlayerInputProvider and input_provider.is_locally_controlled
+	var is_local_view: bool = input_provider is PlayerInputProvider and input_provider.is_locally_controlled
+	camera.current = is_local_view
+	# First-person: hide our own body so it doesn't clip into the view. Only
+	# affects this peer's local rendering — other characters (bots, and
+	# eventually remote players) keep rendering their own VisualRoot normally.
+	visual_root.visible = not is_local_view
 
 
 func _physics_process(delta: float) -> void:
@@ -54,8 +67,8 @@ func _physics_process(delta: float) -> void:
 	var cmd: InputCommand = input_provider.get_input_command() if input_provider else InputCommand.new()
 
 	rotate_y(cmd.look_delta.x)
-	spring_arm.rotation.x = clamp(
-		spring_arm.rotation.x + cmd.look_delta.y,
+	camera.rotation.x = clamp(
+		camera.rotation.x + cmd.look_delta.y,
 		deg_to_rad(Constants.CAMERA_PITCH_MIN),
 		deg_to_rad(Constants.CAMERA_PITCH_MAX)
 	)

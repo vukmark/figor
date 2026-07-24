@@ -6,6 +6,7 @@ extends Node
 @export var flee_health_threshold := 25.0
 @export var turn_rate := 6.0  # radians/sec
 @export var detection_interval := 0.2
+@export var accuracy := 0.55  # chance per eligible frame that a bot actually fires
 
 var character: Character
 var nav_agent: NavigationAgent3D
@@ -17,7 +18,12 @@ var _detection_accum := 0.0
 
 func _ready() -> void:
 	character = _find_character(self)
-	nav_agent = character.nav_agent
+	# Fetch the node directly rather than through Character's @onready var:
+	# BotAI can now be attached to the Character subtree before that subtree
+	# ever enters the tree (see GameManager.spawn_character), which means
+	# child _ready() calls (this one) run before the parent Character's own
+	# _ready() — so its @onready vars aren't populated yet at this point.
+	nav_agent = character.get_node("NavigationAgent3D")
 	_state_machine = BotStateMachine.new(self)
 	_state_machine.change_state("patrol")
 

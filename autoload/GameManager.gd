@@ -36,12 +36,24 @@ func spawn_character(input_provider_scene: PackedScene, peer_id: int = 1) -> Nod
 		return null
 	var character := character_scene.instantiate()
 	character.set_multiplayer_authority(1)
+
+	# Swap the input provider BEFORE the character enters the tree, so its
+	# _ready() never sees the scene's default PlayerInputProvider. Otherwise
+	# a bot would briefly report itself as the locally-controlled player
+	# during its own _ready() (stealing the "current" Camera3D from whichever
+	# camera actually held it, since only one Camera3D can be current per
+	# viewport) before being corrected a moment later.
+	if input_provider_scene:
+		var slot: Node = character.get_node("InputProviderSlot")
+		for child in slot.get_children():
+			slot.remove_child(child)
+			child.free()
+		slot.add_child(input_provider_scene.instantiate())
+
 	characters_root.add_child(character, true)
 	var spawn_point := get_next_spawn_point()
 	if spawn_point:
 		character.global_transform = spawn_point.global_transform
-	if character.has_method("set_input_provider") and input_provider_scene:
-		character.set_input_provider(input_provider_scene.instantiate())
 	return character
 
 

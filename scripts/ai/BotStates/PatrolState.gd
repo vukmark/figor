@@ -1,7 +1,7 @@
 class_name PatrolState
 extends BotState
 
-const PATROL_HALF_EXTENT := 15.0
+const PATROL_HALF_EXTENT := 45.0
 
 
 func enter() -> void:

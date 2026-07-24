@@ -1,8 +1,8 @@
 class_name FleeState
 extends BotState
 
-const FLEE_DISTANCE := 12.0
-const ARENA_HALF_EXTENT := 18.0
+const FLEE_DISTANCE := 15.0
+const ARENA_HALF_EXTENT := 48.0
 
 
 func enter() -> void:
