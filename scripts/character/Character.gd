@@ -82,6 +82,9 @@ func _physics_process(delta: float) -> void:
 
 	var move_dir := (transform.basis * Vector3(cmd.move_vector.x, 0.0, cmd.move_vector.y)).normalized()
 	var speed: float = Constants.SPRINT_SPEED if cmd.sprint_pressed else Constants.MOVE_SPEED
+	# Bigger head = slower target — the tradeoff for a deadlier death explosion.
+	var speed_mult: float = lerp(1.0, Constants.HEAD_MIN_SPEED_MULTIPLIER, head_growth.get_head_scale_ratio())
+	speed *= speed_mult
 
 	knockback_velocity = knockback_velocity.move_toward(Vector3.ZERO, Constants.KNOCKBACK_FRICTION * delta)
 

@@ -2,13 +2,22 @@ class_name PatrolState
 extends BotState
 
 const PATROL_HALF_EXTENT := 45.0
+const PLATFORM_TARGET_CHANCE := 0.3
 
 
 func enter() -> void:
 	_pick_new_point()
 
 
+## With only a couple of platforms scattered across a huge arena, a fully
+## random patrol point would land on one so rarely bots would almost never
+## use the ramps — so occasionally target a platform directly instead.
 func _pick_new_point() -> void:
+	var platforms: Array[Vector3] = GameManager.platform_points
+	if not platforms.is_empty() and randf() < PLATFORM_TARGET_CHANCE:
+		bot_ai.nav_agent.target_position = platforms[randi() % platforms.size()]
+		return
+
 	var origin: Vector3 = bot_ai.character.global_transform.origin
 	var point := Vector3(
 		randf_range(-PATROL_HALF_EXTENT, PATROL_HALF_EXTENT),

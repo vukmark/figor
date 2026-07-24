@@ -12,7 +12,7 @@ const BOT_INPUT_PROVIDER := preload("res://scenes/character/BotInputProvider.tsc
 
 func _ready() -> void:
 	NetworkManager.host_local()
-	GameManager.register_world(world, characters_root, fx_root, arena.get_spawn_points())
+	GameManager.register_world(world, characters_root, fx_root, arena.get_spawn_points(), arena.get_platform_points())
 	_start_match()
 
 

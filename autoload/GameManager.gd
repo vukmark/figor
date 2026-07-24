@@ -9,15 +9,17 @@ var world_root: Node3D
 var characters_root: Node3D
 var fx_root: Node3D
 var spawn_points: Array[Node3D] = []
+var platform_points: Array[Vector3] = []
 
 var _spawn_index := 0
 
 
-func register_world(world: Node3D, characters_container: Node3D, fx_container: Node3D, points: Array[Node3D]) -> void:
+func register_world(world: Node3D, characters_container: Node3D, fx_container: Node3D, points: Array[Node3D], platforms: Array[Vector3] = []) -> void:
 	world_root = world
 	characters_root = characters_container
 	fx_root = fx_container
 	spawn_points = points
+	platform_points = platforms
 	_spawn_index = 0
 
 
