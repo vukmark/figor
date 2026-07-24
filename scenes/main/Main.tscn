@@ -1,0 +1,26 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/arena/Arena_Test01.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ui/HUD.tscn" id="3"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="Arena_Test01" parent="World" instance=ExtResource("2")]
+
+[node name="CharactersRoot" type="Node3D" parent="World"]
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="World/CharactersRoot"]
+_spawnable_scenes = PackedStringArray("res://scenes/character/Character.tscn")
+spawn_path = NodePath("..")
+
+[node name="FXRoot" type="Node3D" parent="World"]
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="World/FXRoot"]
+_spawnable_scenes = PackedStringArray("res://scenes/fx/Explosion.tscn")
+spawn_path = NodePath("..")
+
+[node name="HUD" parent="." instance=ExtResource("3")]
