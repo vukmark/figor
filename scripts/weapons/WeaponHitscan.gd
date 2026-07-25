@@ -13,6 +13,14 @@ signal reload_started(reload_time: float)
 const TRACER_LIFETIME := 0.08
 const MUZZLE_FLASH_LIFETIME := 0.05
 
+const FIRE_SOUND: AudioStream = preload("res://assets/kenney/audio/scifi/Audio/laserLarge_000.ogg")
+const RELOAD_SOUND: AudioStream = preload("res://assets/kenney/audio/scifi/Audio/doorClose_000.ogg")
+const HIT_SOUNDS: Array[AudioStream] = [
+	preload("res://assets/kenney/audio/impact/Audio/impactMetal_medium_000.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/impactMetal_medium_001.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/impactMetal_medium_002.ogg"),
+]
+
 @export var damage := Constants.WEAPON_DAMAGE
 @export var weapon_range := Constants.WEAPON_RANGE
 @export var cooldown := Constants.WEAPON_COOLDOWN
@@ -74,6 +82,7 @@ func try_fire() -> void:
 
 	_spawn_muzzle_flash()
 	_spawn_tracer(global_transform.origin, hit_point)
+	Audio.play_sfx_3d(FIRE_SOUND, global_transform.origin)
 
 	if result.is_empty():
 		fired.emit(to, false)
@@ -84,12 +93,14 @@ func try_fire() -> void:
 	if collider is Character and collider != _character:
 		collider.health.take_damage(damage, _character.player_id)
 		hit_character.emit()
+		Audio.play_random_sfx_3d(HIT_SOUNDS, result.position)
 
 
 func _start_reload() -> void:
 	is_reloading = true
 	_reload_time_remaining = reload_time
 	reload_started.emit(reload_time)
+	Audio.play_sfx_3d(RELOAD_SOUND, global_transform.origin)
 
 
 func _spawn_muzzle_flash() -> void:

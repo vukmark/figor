@@ -6,6 +6,7 @@ signal closed()
 
 const SENSITIVITY_MIN := 0.001
 const SENSITIVITY_MAX := 0.01
+const CLICK_SOUND: AudioStream = preload("res://assets/kenney/audio/interface/Audio/click_003.ogg")
 
 @onready var sensitivity_slider: HSlider = $VBoxContainer/SensitivityRow/SensitivitySlider
 @onready var sensitivity_value_label: Label = $VBoxContainer/SensitivityRow/ValueLabel
@@ -31,7 +32,10 @@ func _ready() -> void:
 
 	sensitivity_slider.value_changed.connect(_on_sensitivity_changed)
 	volume_slider.value_changed.connect(_on_volume_changed)
-	back_button.pressed.connect(func() -> void: closed.emit())
+	back_button.pressed.connect(func() -> void:
+		Audio.play_sfx_2d(CLICK_SOUND)
+		closed.emit()
+	)
 
 
 func _on_sensitivity_changed(value: float) -> void:

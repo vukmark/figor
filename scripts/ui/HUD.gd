@@ -5,6 +5,7 @@ const KILL_FEED_MAX_ENTRIES := 5
 const KILL_FEED_ENTRY_LIFETIME := 5.0
 const HIT_MARKER_COLOR := Color(1, 0.2, 0.2)
 const HIT_MARKER_FLASH_TIME := 0.15
+const CLICK_SOUND: AudioStream = preload("res://assets/kenney/audio/interface/Audio/click_003.ogg")
 
 @onready var health_bar: ProgressBar = $HealthBar
 @onready var head_label: Label = $HeadSizeLabel
@@ -47,11 +48,23 @@ func _ready() -> void:
 
 	pause_panel.visible = false
 	pause_settings_panel.visible = false
-	resume_button.pressed.connect(_toggle_pause)
-	pause_settings_button.pressed.connect(_on_pause_settings_pressed)
+	resume_button.pressed.connect(func() -> void:
+		Audio.play_sfx_2d(CLICK_SOUND)
+		_toggle_pause()
+	)
+	pause_settings_button.pressed.connect(func() -> void:
+		Audio.play_sfx_2d(CLICK_SOUND)
+		_on_pause_settings_pressed()
+	)
 	pause_settings_panel.closed.connect(_on_pause_settings_closed)
-	pause_main_menu_button.pressed.connect(_on_pause_main_menu_pressed)
-	pause_quit_button.pressed.connect(func() -> void: get_tree().quit())
+	pause_main_menu_button.pressed.connect(func() -> void:
+		Audio.play_sfx_2d(CLICK_SOUND)
+		_on_pause_main_menu_pressed()
+	)
+	pause_quit_button.pressed.connect(func() -> void:
+		Audio.play_sfx_2d(CLICK_SOUND)
+		get_tree().quit()
+	)
 
 
 func _process(_delta: float) -> void:

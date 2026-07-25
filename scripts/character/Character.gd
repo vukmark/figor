@@ -21,7 +21,17 @@ var knockback_velocity := Vector3.ZERO
 var player_id: int = -1
 var display_name: String = ""
 
+const FOOTSTEP_DISTANCE_INTERVAL := 2.2
+const FOOTSTEP_SOUNDS: Array[AudioStream] = [
+	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_000.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_001.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_002.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_003.ogg"),
+	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_004.ogg"),
+]
+
 var _gravity_velocity := 0.0
+var _footstep_distance_accum := 0.0
 
 
 func _ready() -> void:
@@ -106,6 +116,7 @@ func _physics_process(delta: float) -> void:
 	velocity.y = _gravity_velocity + knockback_velocity.y
 
 	move_and_slide()
+	_update_footsteps(delta)
 
 	if cmd.fire_pressed and weapon_mount.get_child_count() > 0:
 		var weapon: Node = weapon_mount.get_child(0)
@@ -117,6 +128,20 @@ func _physics_process(delta: float) -> void:
 ## character around; decays each physics frame via knockback_velocity.
 func apply_external_impulse(impulse: Vector3) -> void:
 	knockback_velocity += impulse
+
+
+## Distance-based rather than time-based, so cadence naturally matches
+## actual movement speed (walk vs sprint vs slowed-by-big-head) instead of
+## firing on a fixed timer regardless of how far the character really moved.
+func _update_footsteps(delta: float) -> void:
+	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
+	if not is_on_floor() or horizontal_speed < 0.5:
+		_footstep_distance_accum = 0.0
+		return
+	_footstep_distance_accum += horizontal_speed * delta
+	if _footstep_distance_accum >= FOOTSTEP_DISTANCE_INTERVAL:
+		_footstep_distance_accum = 0.0
+		Audio.play_random_sfx_3d(FOOTSTEP_SOUNDS, global_transform.origin)
 
 
 func _on_died(killer_player_id: int) -> void:

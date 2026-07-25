@@ -6,6 +6,12 @@ extends Node3D
 @onready var vfx: Node3D = $VFX
 @onready var lifetime_timer: Timer = $LifetimeTimer
 
+const EXPLOSION_SOUNDS: Array[AudioStream] = [
+	preload("res://assets/kenney/audio/scifi/Audio/explosionCrunch_000.ogg"),
+	preload("res://assets/kenney/audio/scifi/Audio/explosionCrunch_001.ogg"),
+	preload("res://assets/kenney/audio/scifi/Audio/explosionCrunch_002.ogg"),
+]
+
 var _detonated := false
 
 
@@ -24,6 +30,7 @@ func configure(head_scale_ratio: float, killer_player_id: int, victim_player_id:
 	set_meta("force", force)
 	set_meta("killer_player_id", killer_player_id)
 	set_meta("victim_player_id", victim_player_id)
+	set_meta("head_scale_ratio", head_scale_ratio)
 
 
 func _ready() -> void:
@@ -45,6 +52,10 @@ func _detonate() -> void:
 	var damage: float = get_meta("damage", Constants.EXPLOSION_BASE_DAMAGE)
 	var force: float = get_meta("force", Constants.EXPLOSION_BASE_FORCE)
 	var killer_player_id: int = get_meta("killer_player_id", -1)
+	var head_scale_ratio: float = get_meta("head_scale_ratio", 0.0)
+
+	# Bigger head = bigger explosion = louder bang, not just a wider radius.
+	Audio.play_random_sfx_3d(EXPLOSION_SOUNDS, global_transform.origin, lerp(0.0, 8.0, head_scale_ratio))
 
 	for body in area.get_overlapping_bodies():
 		if body is Character and body.health.is_alive:

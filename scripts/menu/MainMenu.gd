@@ -1,5 +1,7 @@
 extends Control
 
+const CLICK_SOUND: AudioStream = preload("res://assets/kenney/audio/interface/Audio/click_003.ogg")
+
 @onready var main_buttons: VBoxContainer = $VBoxContainer
 @onready var start_button: Button = $VBoxContainer/StartButton
 @onready var settings_button: Button = $VBoxContainer/SettingsButton
@@ -18,18 +20,21 @@ func _ready() -> void:
 
 
 func _on_start_pressed() -> void:
+	Audio.play_sfx_2d(CLICK_SOUND)
 	get_tree().change_scene_to_file("res://scenes/main/Main.tscn")
 
 
 func _on_settings_pressed() -> void:
+	Audio.play_sfx_2d(CLICK_SOUND)
 	main_buttons.visible = false
 	settings_panel.visible = true
 
 
 func _on_settings_closed() -> void:
-	settings_panel.visible = false
 	main_buttons.visible = true
+	settings_panel.visible = false
 
 
 func _on_quit_pressed() -> void:
+	Audio.play_sfx_2d(CLICK_SOUND)
 	get_tree().quit()

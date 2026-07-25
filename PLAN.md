@@ -123,6 +123,33 @@ reasoning.
   pausing freezes a bot's position and the match timer exactly, resume
   unfreezes both, and settings changes apply live and persist across a
   reload.
+- **Sound**: downloaded 3 Kenney SFX packs to `assets/kenney/audio/`
+  (`interface` — UI clicks, `scifi` — weapon fire/explosions/mechanical
+  sounds, `impact` — footsteps/hit impacts, ~300 files, CC0). New
+  `Audio` autoload (`autoload/Audio.gd`) provides `play_sfx_2d`/`play_sfx_3d`/
+  `play_random_sfx_3d` — each spawns a one-shot `AudioStreamPlayer(3D)`,
+  plays it, and frees itself when finished, so no call site has to manage
+  player lifetime by hand. 2D (UI) players use `PROCESS_MODE_ALWAYS` so
+  menu clicks are audible even while the game is paused. Wired in: weapon
+  fire/hit/reload (`WeaponHitscan.gd`), explosion (`ExplosionArea.gd`, with
+  volume scaling by head-size ratio — bigger head, louder bang), footsteps
+  (`Character.gd`, distance-based cadence so it naturally matches actual
+  movement speed rather than firing on a fixed timer), and UI click
+  feedback on every button across `MainMenu`, `SettingsPanel`, and the
+  pause menu. All audio routes through the "Master" bus by default, so
+  `Settings.master_volume` (see pause/settings entry above) already
+  controls it correctly.
+- Real gotcha hit while wiring sound, worth remembering for any future
+  asset downloads: the Kenney "sci-fi-sounds" zip extracted its `Audio/`
+  folder as **read-only** (`dr-xr-xr-x`) — Godot could see the files fine
+  but silently failed to write their `.import` sidecar files into that
+  directory, so `preload()` on them threw "unrecognized file extension"
+  parse errors despite the files being completely valid. Fixed with
+  `chmod u+w` on the affected directory, but a stale Godot filesystem cache
+  kept skipping re-import even after that — needed a full `rm -rf .godot`
+  (safe, it's pure cache) to force a truly fresh scan. If a freshly
+  downloaded/extracted asset pack ever throws this exact error, check
+  directory permissions first.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -165,8 +192,8 @@ regresses):
 
 ## Known limitations / things not done
 
-- No audio at all (no sound assets were ever added).
 - No in-game key-rebinding UI (the input map itself supports it already).
+- No background music, only SFX (weapon/explosion/footsteps/UI).
 - Ramps use smooth inclined-box collision, not literal Kenney stair meshes
   with discrete steps (discrete step colliders risk snagging
   player/bot movement — this was a deliberate tradeoff, see notes above).
@@ -199,8 +226,9 @@ commitment, just a suggested order).
 	  above. Key rebinding UI not included (the input map itself already
 	  supports rebinding, just no in-game UI for it) — left for later if
 	  wanted.
-- [ ] Sound (weapon fire, explosion, footsteps, ambient) — see "Known
-	  limitations" above.
+- [x] Sound (weapon fire, explosion, footsteps, UI) — done, see "Done so
+	  far" above. Ambient/background music not included — see "Known
+	  limitations" above. **All of Tier 2 is now complete.**
 
 **Tier 3 — lower priority, genre-typical:** minimap/radar, directional
 damage indicator, player customization/skins, accessibility options,
@@ -214,9 +242,9 @@ Nothing here is committed to — just candidates to pick from next session.
 	  built. Full plan at `/home/marko/.claude/plans/logical-bubbling-flute.md`
 	  (until overwritten by a future `/plan` — worth copying into this file
 	  or a dedicated doc before that happens if it's not built soon).
-      Short version: `FastNoiseLite` + `HeightMapShape3D`, single static
-      mesh built once per match (not chunked — arena is bounded, ~100x100),
-      flatten patches under spawn points/walls/platforms so existing
+	  Short version: `FastNoiseLite` + `HeightMapShape3D`, single static
+	  mesh built once per match (not chunked — arena is bounded, ~100x100),
+	  flatten patches under spawn points/walls/platforms so existing
 	  obstacle logic keeps working, biggest open risk is whether Godot's
 	  navmesh baker parses `HeightMapShape3D` correctly (plan includes a
 	  spike step to validate that first, with a mesh-instance-parsing
