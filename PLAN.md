@@ -5,9 +5,8 @@ progress, and what's next.
 
 Note: `/home/marko/.claude/plans/logical-bubbling-flute.md` is Claude Code's
 plan-mode scratch file — it gets *overwritten* every time a new `/plan`
-session runs, so it only ever holds the most recently drafted plan (currently:
-noise-based terrain, see backlog below), not a history. Anything worth
-keeping long-term belongs here instead.
+session runs, so it only ever holds whatever was drafted most recently, not
+a history. Anything worth keeping long-term belongs here instead.
 
 ## Concept
 
@@ -42,7 +41,8 @@ reasoning.
   imprecise aim (`accuracy` chance) so fights aren't instant.
 - Procedurally generated arena each match: randomized wall segments,
   crates, columns, plus 2 elevated platforms with ramps up (real
-  verticality — see notes below on why ramps not discrete stairs).
+  verticality — see notes below on why ramps not discrete stairs), and
+  noise-based rolling-hill terrain (see "Done so far" entry below).
 - HUD: health, head-size %, kill feed (now with real player names), hit-marker
   flash, muzzle flash + tracer VFX on fire, match countdown timer,
   toggleable scoreboard (Tab), game-over screen with final scores and
@@ -150,6 +150,70 @@ reasoning.
   (safe, it's pure cache) to force a truly fresh scan. If a freshly
   downloaded/extracted asset pack ever throws this exact error, check
   directory permissions first.
+- **Noise-based terrain**: new `scripts/arena/ArenaTerrain.gd` (a plain
+  `RefCounted`, not a node) builds one rolling-hill heightmap per match via
+  `FastNoiseLite` (101×101 grid, `HeightMapShape3D` requires exactly 1
+  unit/vertex spacing, no chunking needed since the arena is bounded).
+  Border and spawn-point areas are smoothstep-flattened (spawn points
+  specifically flatten to *exactly* 0, not "whatever height was already
+  there" — see bug note below), plus a 2-pass box blur as an explicit
+  slope-bounding backstop. `Arena.gd`'s generation order changed: terrain
+  heights generate first, then obstacles place themselves by sampling
+  `_get_terrain_height(x, z)` instead of assuming flat y=0 (platforms also
+  call `ArenaTerrain.flatten_patch()` on their own footprint so they sit
+  flush instead of clipping into or floating above slopes), and only then
+  is the actual mesh+`HeightMapShape3D` collision built and the navmesh
+  baked — so everything downstream sees the final, fully-flattened heights.
+  The old static flat floor in `Arena_Test01.tscn` was removed entirely
+  (kept alongside the terrain, it would have let characters walk through
+  hills at y=0 instead of over them). Two things validated before/during
+  the build, both worth knowing if this code is touched again:
+  (1) Godot's navmesh baker *does* correctly parse `HeightMapShape3D`
+  terrain via the same `PARSED_GEOMETRY_STATIC_COLLIDERS` mode already used
+  for every other obstacle — confirmed with an isolated spike test before
+  writing the full pipeline, no fallback needed.
+  (2) The visual mesh and physics collision are built from the exact same
+  height array and are perfectly aligned — verified directly by comparing
+  `get_height()` against real raycast hits (error ~5×10⁻⁶, floating-point
+  noise only).
+  Real bug caught along the way: `flatten_patch()`'s default behavior
+  (flatten to whatever height already happens to be at the center point)
+  is correct for platforms but was wrong for spawn points, whose markers
+  are static y=1 `Node3D`s, not dynamically placed — fixed by adding an
+  explicit `target_height` parameter, with spawn flattening now passing
+  `0.0`. Verified end-to-end: 16/16 crates and columns sit exactly on the
+  terrain surface at their correct offsets, a platform stayed fully
+  reachable (17-point path climbing to the right height), and terrain
+  genuinely differs between separate runs/restarts.
+- **Terrain flatness follow-up fix**: user playtest report was "terrain
+  still is flat." Root cause was tuning, not a data bug — the original
+  `NOISE_AMPLITUDE = 2.5` produced a real but tiny ~11° worst-case slope,
+  imperceptible at first-person eye height. Raising amplitude alone isn't
+  safe: the original 2-pass box blur only bounds *average* slope, not
+  worst case, and pushing amplitude up (tried 6.0, 10.0, 7.5) surfaced
+  seeds with single-cell slopes of 37-40°+, too close to
+  `CharacterBody3D`'s ~45° `floor_max_angle` for comfort. Fixed properly by
+  adding `ArenaTerrain.clamp_slopes()` — an explicit iterative
+  pairwise-relaxation pass (up to 25 iterations) that mathematically
+  guarantees no two adjacent grid cells differ by more than
+  `tan(MAX_SLOPE_DEGREES) * CELL_SIZE`, decoupling "visually noticeable"
+  amplitude from "guaranteed climbable" slope. Final tuning:
+  `NOISE_AMPLITUDE = 12.0`, `MAX_SLOPE_DEGREES = 28.0` (comfortable margin
+  under the 45° limit for knockback/jump timing). Verified across 5 seeds:
+  height span now 10-16 units per match (vs. the original sub-1-unit
+  variation), worst-case slope converges to 28-29.5° on every seed.
+  Second real bug caught while re-verifying at the new amplitude:
+  `Arena.gd` called `clamp_slopes()` *after* `_generate_obstacles()`, but
+  obstacles read `_get_terrain_height()` to place themselves *before* that
+  call — so the heightmap could still shift under an already-placed
+  obstacle, leaving it floating/sunken by a small amount (caught directly:
+  one crate off by ~0.12 units). Fixed by moving `clamp_slopes()` to run
+  immediately after `generate()`, before any obstacle samples the
+  heightmap — re-verified with 19/19 obstacles landing exactly on the
+  final terrain and platform pathfinding still working (12-point path to
+  the platform top). Full `Main.tscn` run confirmed clean otherwise (one
+  pre-existing, harmless "navmesh edge merge" warning from the baker, not
+  a functional error).
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -238,17 +302,7 @@ additional game modes (currently implicit free-for-all).
 
 Nothing here is committed to — just candidates to pick from next session.
 
-- [ ] **Noise-based terrain (rolling hills)** — fully designed, not yet
-	  built. Full plan at `/home/marko/.claude/plans/logical-bubbling-flute.md`
-	  (until overwritten by a future `/plan` — worth copying into this file
-	  or a dedicated doc before that happens if it's not built soon).
-	  Short version: `FastNoiseLite` + `HeightMapShape3D`, single static
-	  mesh built once per match (not chunked — arena is bounded, ~100x100),
-	  flatten patches under spawn points/walls/platforms so existing
-	  obstacle logic keeps working, biggest open risk is whether Godot's
-	  navmesh baker parses `HeightMapShape3D` correctly (plan includes a
-	  spike step to validate that first, with a mesh-instance-parsing
-	  fallback if not).
+- [x] Noise-based terrain (rolling hills) — done, see "Done so far" above.
 - [ ] Stage 2: local multiplayer (split-screen/hotseat)
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [ ] Sound (weapon fire, explosion, footsteps, ambient)

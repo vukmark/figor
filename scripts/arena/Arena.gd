@@ -32,6 +32,7 @@ const SIDE_DIRECTIONS := [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(1, 0, 0),
 @onready var nav_region: NavigationRegion3D = $NavRegion
 @onready var spawn_points_root: Node3D = $SpawnPoints
 @onready var obstacles_root: Node3D = $NavRegion/Obstacles
+@onready var terrain_root: Node3D = $NavRegion/Terrain
 
 ## Each entry: {position: Vector3, size: Vector3} — footprint (x/z) used for
 ## overlap checks against later placements.
@@ -43,12 +44,57 @@ var _placed: Array[Dictionary] = []
 ## so rarely that the feature would barely ever get used in a normal match.
 var _platform_points: Array[Vector3] = []
 
+var _terrain: ArenaTerrain
+
 
 func _ready() -> void:
 	if not Engine.is_editor_hint():
 		randomize()
+
+		_terrain = ArenaTerrain.new()
+		var spawn_positions: Array = []
+		for sp in get_spawn_points():
+			spawn_positions.append(sp.global_transform.origin)
+		_terrain.generate(randi(), spawn_positions)
+
+		# Clamp raw noise slope BEFORE obstacles sample/flatten the heightmap —
+		# obstacles read get_height() to place themselves, and the mesh+
+		# collision are built from these same final heights, so placement and
+		# the built terrain must agree. Clamping afterward instead (as a
+		# platform's own flatten_patch call runs mid-placement) would let the
+		# heightmap shift again after an obstacle already read its Y from it,
+		# leaving that obstacle floating/sunken relative to the real terrain.
+		_terrain.clamp_slopes()
+		# Obstacles sample/flatten the heightmap as they place themselves —
+		# the mesh+collision are only built afterward, from the final
+		# (obstacle-flattened) heights, so platforms sit flush instead of
+		# clipping into or floating above sloped ground.
 		_generate_obstacles()
+		_build_terrain_body()
+
 		nav_region.bake_navigation_mesh(false)
+
+
+func _build_terrain_body() -> void:
+	var body := StaticBody3D.new()
+	terrain_root.add_child(body)
+
+	var collision := CollisionShape3D.new()
+	collision.shape = _terrain.build_collision_shape()
+	body.add_child(collision)
+
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = _terrain.build_mesh()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.35, 0.37, 0.4, 1)
+	mesh_instance.material_override = mat
+	body.add_child(mesh_instance)
+
+
+## Obstacle placement can't assume flat y=0 ground now that the arena has
+## real terrain — this is the shared entry point every placer samples.
+func _get_terrain_height(x: float, z: float) -> float:
+	return _terrain.get_height(x, z) if _terrain else 0.0
 
 
 ## Randomized each run so every match gets a different layout — the floor,
@@ -91,9 +137,15 @@ func _place_platform() -> void:
 	if not is_finite(pos.x):
 		return
 
+	# Flatten the ground under the whole platform+ramp footprint to this
+	# point's own height BEFORE reading it for placement — a flat-topped
+	## platform box would otherwise clip into or float above sloped terrain.
+	_terrain.flatten_patch(Vector2(pos.x, pos.z), clearance * 0.5)
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
 	var platform_body := StaticBody3D.new()
 	obstacles_root.add_child(platform_body)
-	platform_body.global_transform.origin = Vector3(pos.x, PLATFORM_HEIGHT * 0.5, pos.z)
+	platform_body.global_transform.origin = Vector3(pos.x, ground_y + PLATFORM_HEIGHT * 0.5, pos.z)
 
 	var platform_size := Vector3(plat_w, PLATFORM_HEIGHT, plat_d)
 	var collision := CollisionShape3D.new()
@@ -113,15 +165,17 @@ func _place_platform() -> void:
 
 	var side: Vector3 = SIDE_DIRECTIONS[randi() % SIDE_DIRECTIONS.size()]
 	var half_dim := plat_d * 0.5 if side.z != 0.0 else plat_w * 0.5
-	var top_point := pos + side * half_dim + Vector3(0, PLATFORM_HEIGHT, 0)
-	# The bottom end is buried slightly below floor level (not flush at
-	# exactly y=0) so the ramp surface transitions smoothly into the floor
-	# with no seam/lip for a CharacterBody3D to catch on.
-	var bottom_point := pos + side * (half_dim + RAMP_RUN) + Vector3(0, -0.4, 0)
+	var top_point := Vector3(pos.x, ground_y + PLATFORM_HEIGHT, pos.z) + side * half_dim
+	# The bottom end samples terrain height independently at its own (x,z) —
+	# it may land on different local ground than the platform itself — then
+	# is buried slightly below that (not flush) so the ramp surface
+	# transitions smoothly with no seam/lip for a CharacterBody3D to catch on.
+	var bottom_xz := pos + side * (half_dim + RAMP_RUN)
+	var bottom_point := Vector3(bottom_xz.x, _get_terrain_height(bottom_xz.x, bottom_xz.z) - 0.4, bottom_xz.z)
 	_build_ramp(top_point, bottom_point)
 
 	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": Vector3(clearance, 0, clearance)})
-	_platform_points.append(Vector3(pos.x, PLATFORM_HEIGHT, pos.z))
+	_platform_points.append(Vector3(pos.x, ground_y + PLATFORM_HEIGHT, pos.z))
 
 
 func _build_ramp(top_point: Vector3, bottom_point: Vector3) -> void:
@@ -178,7 +232,7 @@ func _place_wall_segment() -> void:
 
 	var body := StaticBody3D.new()
 	obstacles_root.add_child(body)
-	body.global_transform.origin = Vector3(pos.x, WALL_HEIGHT * 0.5, pos.z)
+	body.global_transform.origin = Vector3(pos.x, _get_terrain_height(pos.x, pos.z) + WALL_HEIGHT * 0.5, pos.z)
 	if rotated_90:
 		body.rotate_y(deg_to_rad(90.0))
 
@@ -208,7 +262,7 @@ func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_off
 
 	var body := StaticBody3D.new()
 	obstacles_root.add_child(body)
-	body.global_transform.origin = Vector3(pos.x, height_offset, pos.z)
+	body.global_transform.origin = Vector3(pos.x, _get_terrain_height(pos.x, pos.z) + height_offset, pos.z)
 
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
