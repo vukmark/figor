@@ -63,6 +63,9 @@ func _process(_delta: float) -> void:
 			var main := get_tree().current_scene
 			if main and main.has_method("restart_match"):
 				main.restart_match()
+		elif Input.is_action_just_pressed("main_menu"):
+			NetworkManager.close_peer()
+			get_tree().change_scene_to_file("res://scenes/menu/MainMenu.tscn")
 	else:
 		if game_over_panel.visible:
 			game_over_panel.visible = false
@@ -132,7 +135,7 @@ func _refresh_scoreboard() -> void:
 
 func _on_match_ended(winner_player_id: int, reason: String) -> void:
 	var winner_name: String = GameManager.scores.get(winner_player_id, {}).get("name", "No one")
-	game_over_label.text = "%s wins! (%s)\nPress R to play again" % [winner_name, reason]
+	game_over_label.text = "%s wins! (%s)\nPress R to play again, or M for Main Menu" % [winner_name, reason]
 	_populate_rows(game_over_rows)
 	game_over_panel.visible = true
 	scoreboard_panel.visible = false

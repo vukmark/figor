@@ -22,6 +22,7 @@ func host_local() -> void:
 
 
 func host_game(port: int = DEFAULT_PORT) -> void:
+	close_peer()
 	peer = ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, MAX_CLIENTS)
 	if err != OK:
@@ -31,6 +32,7 @@ func host_game(port: int = DEFAULT_PORT) -> void:
 
 
 func join_game(address: String, port: int = DEFAULT_PORT) -> void:
+	close_peer()
 	peer = ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
 	if err != OK:
@@ -39,8 +41,20 @@ func join_game(address: String, port: int = DEFAULT_PORT) -> void:
 	multiplayer.multiplayer_peer = peer
 
 
+## Releases the current peer (and its bound port) before creating a new one.
+## Without this, going back to the main menu and starting a new match would
+## call host_game() again while the old ENetMultiplayerPeer might still hold
+## the port, risking a rebind failure — NetworkManager is an autoload, so its
+## state persists across scene changes unless explicitly torn down like this.
+func close_peer() -> void:
+	if peer:
+		peer.close()
+		peer = null
+	multiplayer.multiplayer_peer = null
+
+
 func is_server() -> bool:
-	return multiplayer.is_server()
+	return multiplayer.has_multiplayer_peer() and multiplayer.is_server()
 
 
 func _on_peer_connected(id: int) -> void:

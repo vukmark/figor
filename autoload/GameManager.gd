@@ -49,7 +49,10 @@ func reset_match() -> void:
 
 
 func _process(delta: float) -> void:
-	if match_over or not multiplayer.is_server():
+	# multiplayer.is_server() throws if no peer is assigned at all (e.g. while
+	# sitting at the main menu after NetworkManager.close_peer()) — has_multiplayer_peer()
+	# guards that instead of erroring every single frame.
+	if match_over or not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
 		return
 	match_time_remaining = max(match_time_remaining - delta, 0.0)
 	if match_time_remaining <= 0.0:
@@ -136,7 +139,7 @@ func spawn_character(input_provider_scene: PackedScene, display_name: String = "
 ## Server-only: decides an explosion happened, spawns the one-shot effect,
 ## and records the kill/death.
 func spawn_explosion(pos: Vector3, head_scale_ratio: float, killer_player_id: int, victim_player_id: int) -> void:
-	if not multiplayer.is_server():
+	if not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
 		return
 	if explosion_scene == null or fx_root == null:
 		push_warning("GameManager: explosion_scene or fx_root not set")

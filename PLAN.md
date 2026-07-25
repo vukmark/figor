@@ -93,6 +93,19 @@ reasoning.
   from the death spot). HUD shows a "Killed by X" / "You died" overlay with
   a live countdown, shown for exactly `Constants.RESPAWN_DELAY` and hidden
   in sync with the actual respawn.
+- **Main menu**: `scenes/menu/MainMenu.tscn` is now `run/main_scene`
+  (title, Start Match, Quit). Start transitions to `Main.tscn` via
+  `change_scene_to_file`. Game-over screen now offers both **R** (restart
+  in place, fresh procedural arena) and **M** (return to `MainMenu`).
+  `NetworkManager.host_game()`/`join_game()` now call a new `close_peer()`
+  first (releases the old `ENetMultiplayerPeer` and its port) — without
+  this, returning to the menu and starting a second match risked a port
+  rebind failure. Verified directly: menu → match → menu → second match,
+  twice through, no errors. Also fixed a bug this surfaced: `GameManager._process()`
+  and `NetworkManager.is_server()` called `multiplayer.is_server()`
+  unconditionally, which throws when no peer is assigned at all (e.g. idle
+  at the main menu after `close_peer()`) — both now check
+  `multiplayer.has_multiplayer_peer()` first.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -136,7 +149,7 @@ regresses):
 ## Known limitations / things not done
 
 - No audio at all (no sound assets were ever added).
-- No main menu — `Main.tscn` auto-hosts and auto-spawns on load.
+- No pause menu, no settings/options UI (sensitivity, volume, key rebinding).
 - Ramps use smooth inclined-box collision, not literal Kenney stair meshes
   with discrete steps (discrete step colliders risk snagging
   player/bot movement — this was a deliberate tradeoff, see notes above).
@@ -162,8 +175,12 @@ commitment, just a suggested order).
 - [x] Death/spectator feedback — done, see "Done so far" above. All of
 	  Tier 1 is now complete.
 
-**Tier 2 — expected baseline polish** (see "Known limitations" above):
-sound, main menu, pause menu, settings/options UI.
+**Tier 2 — expected baseline polish:**
+- [x] Main menu — done, see "Done so far" above.
+- [ ] Pause menu
+- [ ] Settings/options UI (sensitivity, volume, key rebinding)
+- [ ] Sound (weapon fire, explosion, footsteps, ambient) — see "Known
+	  limitations" above.
 
 **Tier 3 — lower priority, genre-typical:** minimap/radar, directional
 damage indicator, player customization/skins, accessibility options,
