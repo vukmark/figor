@@ -36,6 +36,10 @@ const WEAPON_COOLDOWN := 0.35
 ## shot lands — miss even one and you're reloading mid-fight.
 const WEAPON_MAGAZINE_SIZE := 8
 const WEAPON_RELOAD_TIME := 1.8
+## The head hitbox grows over a match (see HeadGrowth), so a bigger head is
+## both a bigger risk (bigger death explosion) and a bigger target — this
+## reward makes aiming for it worthwhile even before it's grown much.
+const HEADSHOT_DAMAGE_MULTIPLIER := 2.0
 
 ## At ratio=1.0 (fully grown head) the radius/damage below are tuned to
 ## realistically wipe out most/all of the 100x100 arena — anyone within

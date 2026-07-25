@@ -214,6 +214,15 @@ reasoning.
   the platform top). Full `Main.tscn` run confirmed clean otherwise (one
   pre-existing, harmless "navmesh edge merge" warning from the baker, not
   a functional error).
+- **Headshot damage multiplier**: `WeaponHitscan.try_fire()` resolves
+  `result.shape` (a shape index local to the hit CharacterBody3D's compound
+  shape, not a node) back to the owning `CollisionShape3D` via
+  `shape_find_owner()`/`shape_owner_get_owner()`, then compares it against
+  the target's `head_hitbox` — a 2x multiplier
+  (`Constants.HEADSHOT_DAMAGE_MULTIPLIER`) applies only on a match. Verified
+  directly by firing at a target's head-hitbox world position vs. its torso
+  in a headless test: 28 damage (2x14) on the head, 14 on the body, exactly
+  as expected.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -262,9 +271,6 @@ regresses):
   with discrete steps (discrete step colliders risk snagging
   player/bot movement — this was a deliberate tradeoff, see notes above).
 - Only 1 weapon type (hitscan).
-- No headshot damage multiplier — the head hitbox exists for aim
-  accuracy/visual correctness, not bonus damage (could be added easily
-  since `WeaponHitscan.gd` already knows which shape it hit).
 - Bot patrol has a 30% chance to target a platform directly (otherwise
   platforms would almost never see traffic in a large arena) — this is a
   bit of a hack; a nicer long-term fix would be genuine points-of-interest
@@ -305,10 +311,12 @@ Nothing here is committed to — just candidates to pick from next session.
 - [x] Noise-based terrain (rolling hills) — done, see "Done so far" above.
 - [ ] Stage 2: local multiplayer (split-screen/hotseat)
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
-- [ ] Sound (weapon fire, explosion, footsteps, ambient)
-- [ ] Main menu / start screen
+- [x] Headshot damage multiplier — done, see "Done so far" above.
 - [ ] More weapon variety
-- [ ] Headshot damage multiplier
 - [ ] Visual stairs (decorative Kenney stair mesh over the existing ramp
 	  collision) instead of a plain primitive ramp
 - [ ] More elaborate platform layouts (multiple tiers, connected platforms)
+- [ ] Background music (SFX already done, see "Known limitations" above)
+- [ ] In-game key-rebinding UI (input map already supports it)
+- [ ] Tier 3 polish: minimap/radar, directional damage indicator, player
+	  skins, accessibility options, additional game modes

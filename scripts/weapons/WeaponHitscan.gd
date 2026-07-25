@@ -91,9 +91,20 @@ func try_fire() -> void:
 	fired.emit(result.position, true)
 	var collider: Object = result.collider
 	if collider is Character and collider != _character:
-		collider.health.take_damage(damage, _character.player_id)
+		var is_headshot := _is_headshot(collider, result.shape)
+		var dealt_damage: float = damage * Constants.HEADSHOT_DAMAGE_MULTIPLIER if is_headshot else damage
+		collider.health.take_damage(dealt_damage, _character.player_id)
 		hit_character.emit()
 		Audio.play_random_sfx_3d(HIT_SOUNDS, result.position)
+
+
+## `result.shape` from intersect_ray is a shape index local to the collider's
+## own compound shape, not a node — resolve it back to the owning
+## CollisionShape3D and compare against the character's dedicated head
+## hitbox to tell a headshot from a body hit.
+func _is_headshot(character: Character, shape_index: int) -> bool:
+	var owner_id := character.shape_find_owner(shape_index)
+	return character.shape_owner_get_owner(owner_id) == character.head_hitbox
 
 
 func _start_reload() -> void:
