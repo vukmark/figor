@@ -148,3 +148,24 @@ horizontal_alignment = 1
 [node name="Rows" type="VBoxContainer" parent="GameOverPanel/VBoxContainer"]
 layout_mode = 2
 mouse_filter = 2
+
+[node name="DeathOverlay" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = -50.0
+offset_right = 140.0
+offset_bottom = 50.0
+mouse_filter = 2
+visible = false
+
+[node name="DeathLabel" type="Label" parent="DeathOverlay"]
+layout_mode = 2
+mouse_filter = 2
+text = "You died
+Respawning in 3..."
+horizontal_alignment = 1

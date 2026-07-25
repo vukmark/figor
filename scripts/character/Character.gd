@@ -79,6 +79,13 @@ func _physics_process(delta: float) -> void:
 		deg_to_rad(Constants.CAMERA_PITCH_MAX)
 	)
 
+	# Dead: frozen in place (no movement/gravity/firing) until respawn, but
+	# can still look around from the death spot — a minimal spectator view.
+	# Without this, a dead character (invisible, non-colliding) could still
+	# walk around and shoot people for the whole respawn countdown.
+	if not health.is_alive:
+		return
+
 	if is_on_floor():
 		_gravity_velocity = 0.0
 		if cmd.jump_pressed:

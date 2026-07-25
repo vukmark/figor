@@ -17,8 +17,12 @@ const HIT_MARKER_FLASH_TIME := 0.15
 @onready var game_over_panel: Control = $GameOverPanel
 @onready var game_over_label: Label = $GameOverPanel/VBoxContainer/WinnerLabel
 @onready var game_over_rows: VBoxContainer = $GameOverPanel/VBoxContainer/Rows
+@onready var death_overlay: Control = $DeathOverlay
+@onready var death_label: Label = $DeathOverlay/DeathLabel
 
 var _local_character: Character
+var _death_countdown := 0.0
+var _death_reason_text := ""
 
 
 func _ready() -> void:
@@ -27,6 +31,7 @@ func _ready() -> void:
 	GameManager.scores_changed.connect(_refresh_scoreboard)
 	scoreboard_panel.visible = false
 	game_over_panel.visible = false
+	death_overlay.visible = false
 
 
 func _process(_delta: float) -> void:
@@ -46,6 +51,12 @@ func _process(_delta: float) -> void:
 		head_label.text = "Head: %.0f%%" % (_local_character.head_growth.get_head_scale_ratio() * 100.0)
 
 	timer_label.text = _format_time(GameManager.match_time_remaining)
+
+	if death_overlay.visible:
+		_death_countdown = max(_death_countdown - _delta, 0.0)
+		death_label.text = "%s\nRespawning in %.0f..." % [_death_reason_text, ceil(_death_countdown)]
+		if _death_countdown <= 0.0:
+			death_overlay.visible = false
 
 	if GameManager.match_over:
 		if Input.is_action_just_pressed("restart_match"):
@@ -109,6 +120,11 @@ func _on_character_died(victim_player_id: int, killer_player_id: int) -> void:
 	timer.timeout.connect(entry.queue_free)
 	timer.start()
 
+	if _local_character and victim_player_id == _local_character.player_id:
+		_death_reason_text = "You died" if killer_player_id == victim_player_id or not GameManager.scores.has(killer_player_id) else "Killed by %s" % killer_name
+		_death_countdown = Constants.RESPAWN_DELAY
+		death_overlay.visible = true
+
 
 func _refresh_scoreboard() -> void:
 	_populate_rows(scoreboard_rows)
@@ -120,6 +136,7 @@ func _on_match_ended(winner_player_id: int, reason: String) -> void:
 	_populate_rows(game_over_rows)
 	game_over_panel.visible = true
 	scoreboard_panel.visible = false
+	death_overlay.visible = false
 
 
 func _populate_rows(container: VBoxContainer) -> void:

@@ -85,6 +85,14 @@ reasoning.
   player and bots with zero bot-side special-casing. Firing is blocked
   while `is_reloading` is true. HUD shows an ammo counter (`current/max`)
   that switches to "Reloading..." during reload.
+- **Death/spectator feedback**: fixed a real bug found along the way —
+  `Character._physics_process` never checked `health.is_alive`, so a dead
+  (invisible, non-colliding) character could still walk around and fire
+  their weapon for the entire respawn countdown. Now movement/gravity/firing
+  freeze on death, but look-around still works (a minimal spectator view
+  from the death spot). HUD shows a "Killed by X" / "You died" overlay with
+  a live countdown, shown for exactly `Constants.RESPAWN_DELAY` and hidden
+  in sync with the actual respawn.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -151,12 +159,11 @@ commitment, just a suggested order).
 - [x] Scoreboard/persistent score — done, see "Done so far" above.
 - [x] Ammo/reload system — done, see "Done so far" above.
 - [x] Spawn safety — done, see "Done so far" above.
-- [ ] Death/spectator feedback — `RespawnComponent.begin_respawn_countdown()`
-	  just hides the character; no "You died"/"Killed by X" message, no
-	  death animation, no spectator camera during the 3s respawn delay.
+- [x] Death/spectator feedback — done, see "Done so far" above. All of
+	  Tier 1 is now complete.
 
 **Tier 2 — expected baseline polish** (see "Known limitations" above):
-sound, main menu, pause menu, settings/options UI, restart-match flow.
+sound, main menu, pause menu, settings/options UI.
 
 **Tier 3 — lower priority, genre-typical:** minimap/radar, directional
 damage indicator, player customization/skins, accessibility options,
