@@ -1,0 +1,8 @@
+Track: "Frozen Jam (Seamless Loop)"
+Author: Elle Trudgett (edited by qubodup)
+Source: https://opengameart.org/content/frozen-jam-seamless-loop
+License: Creative Commons Attribution 3.0 (CC-BY 3.0)
+https://creativecommons.org/licenses/by/3.0/
+
+This track requires attribution when used. Everything else under
+assets/kenney/ is CC0 and does not.

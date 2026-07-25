@@ -265,6 +265,23 @@ reasoning.
   straight through solid-looking stairs, and a single non-uniformly
   scaled model didn't read as real stairs regardless. Back to the plain
   box mesh visual for now — see "Known limitations" below.
+- **Background music**: Kenney's audio packs turned out to have no real
+  ambient/loop music, only short (5-10s) chiptune "jingle" stingers meant
+  for things like level-complete fanfares — a poor, repetitive fit for a
+  continuous match loop. Sourced "Frozen Jam (Seamless Loop)" by Elle
+  Trudgett (edited by qubodup) from OpenGameArt.org instead — a genuine
+  103-second seamless cyber/space-themed loop, CC-BY 3.0 (attribution
+  required, unlike the rest of the project's CC0 Kenney assets — credited
+  in `assets/music/License.txt`). `Audio.gd` gained a persistent
+  `AudioStreamPlayer` (autoloads survive scene changes, so this isn't
+  recreated per scene) plus `play_music()`/`stop_music()`; `play_music()`
+  no-ops if the requested track is already playing, so `Main.gd` can call
+  it unconditionally on both initial load and every `restart_match()`
+  without the track jarringly restarting from 0 on every restart. Stops on
+  the two return-to-main-menu paths in `HUD.gd` (pause menu and the
+  game-over screen) so it doesn't keep playing into the menu. Verified
+  directly: music is playing at match start with the correct track and
+  volume (-10 dB), and a full match run stays clean.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -308,7 +325,6 @@ regresses):
 ## Known limitations / things not done
 
 - No in-game key-rebinding UI (the input map itself supports it already).
-- No background music, only SFX (weapon/explosion/footsteps/UI).
 - Ramps are still a plain smooth inclined box, both visually and for
   collision (discrete step colliders risk snagging player/bot movement) —
   a decorative stair-mesh attempt was tried and reverted, see "Done so
@@ -358,7 +374,7 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] Visual stairs — tried and reverted, see "Done so far" above (the
 	  ramp still looks like a plain inclined box for now).
 - [ ] More elaborate platform layouts (multiple tiers, connected platforms)
-- [ ] Background music (SFX already done, see "Known limitations" above)
+- [x] Background music — done, see "Done so far" above.
 - [ ] In-game key-rebinding UI (input map already supports it)
 - [ ] Tier 3 polish: minimap/radar, directional damage indicator, player
 	  skins, accessibility options, additional game modes

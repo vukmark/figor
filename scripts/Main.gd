@@ -7,6 +7,7 @@ extends Node
 
 const ARENA_SCENE: PackedScene = preload("res://scenes/arena/Arena_Test01.tscn")
 const BOT_INPUT_PROVIDER := preload("res://scenes/character/BotInputProvider.tscn")
+const MUSIC_TRACK: AudioStream = preload("res://assets/music/frozenjam-seamlessloop.ogg")
 
 @export var bot_count := 5
 
@@ -16,6 +17,7 @@ func _ready() -> void:
 	GameManager.reset_match()
 	GameManager.register_world(world, characters_root, fx_root, arena.get_spawn_points(), arena.get_platform_points())
 	_start_match()
+	Audio.play_music(MUSIC_TRACK)
 
 
 func _start_match() -> void:
@@ -46,3 +48,7 @@ func restart_match() -> void:
 	GameManager.reset_match()
 	GameManager.register_world(world, characters_root, fx_root, arena.get_spawn_points(), arena.get_platform_points())
 	_start_match()
+	# Not merely defensive: play_music() no-ops when this track is already
+	# playing, so a restart keeps the music running uninterrupted instead
+	# of jarringly restarting it from 0.
+	Audio.play_music(MUSIC_TRACK)

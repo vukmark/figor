@@ -104,6 +104,7 @@ func _process(_delta: float) -> void:
 				main.restart_match()
 		elif Input.is_action_just_pressed("main_menu"):
 			NetworkManager.close_peer()
+			Audio.stop_music()
 			get_tree().change_scene_to_file("res://scenes/menu/MainMenu.tscn")
 	else:
 		if game_over_panel.visible:
@@ -138,6 +139,7 @@ func _on_pause_settings_closed() -> void:
 func _on_pause_main_menu_pressed() -> void:
 	get_tree().paused = false
 	NetworkManager.close_peer()
+	Audio.stop_music()
 	get_tree().change_scene_to_file("res://scenes/menu/MainMenu.tscn")
 
 
