@@ -251,6 +251,20 @@ reasoning.
   landed, consistent with the spread cone), ammo dropped by exactly 1 per
   trigger pull despite firing 6 rays, and the magazine correctly
   auto-reloaded after the 2nd shot emptied it.
+- **Visual stairs — tried and reverted**: attempted swapping the ramp's
+  flat box mesh for an instanced Kenney `stairs.glb` model (purely visual,
+  oriented upright rather than tilted to the incline). Along the way, found
+  and fixed a real Godot gotcha — `Basis.scaled(v)` scales along **world**
+  X/Y/Z axes, not a rotated basis's own local axes, so it silently sheared
+  the mesh on any non-axis-aligned ramp; fixed by building the
+  already-scaled basis columns directly instead. Numerically verified
+  correct after that fix (exact `RAMP_WIDTH` on the width axis, correct
+  rise/run on the others). Reverted anyway after actual playtesting: the
+  stair mesh has no collision of its own (the real collision is still the
+  separate invisible inclined box), so visually it looked like walking
+  straight through solid-looking stairs, and a single non-uniformly
+  scaled model didn't read as real stairs regardless. Back to the plain
+  box mesh visual for now — see "Known limitations" below.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -295,9 +309,10 @@ regresses):
 
 - No in-game key-rebinding UI (the input map itself supports it already).
 - No background music, only SFX (weapon/explosion/footsteps/UI).
-- Ramps use smooth inclined-box collision, not literal Kenney stair meshes
-  with discrete steps (discrete step colliders risk snagging
-  player/bot movement — this was a deliberate tradeoff, see notes above).
+- Ramps are still a plain smooth inclined box, both visually and for
+  collision (discrete step colliders risk snagging player/bot movement) —
+  a decorative stair-mesh attempt was tried and reverted, see "Done so
+  far" above.
 - Bot patrol has a 30% chance to target a platform directly (otherwise
   platforms would almost never see traffic in a large arena) — this is a
   bit of a hack; a nicer long-term fix would be genuine points-of-interest
@@ -340,8 +355,8 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [x] Headshot damage multiplier — done, see "Done so far" above.
 - [x] More weapon variety — done, see "Done so far" above.
-- [ ] Visual stairs (decorative Kenney stair mesh over the existing ramp
-	  collision) instead of a plain primitive ramp
+- [ ] Visual stairs — tried and reverted, see "Done so far" above (the
+	  ramp still looks like a plain inclined box for now).
 - [ ] More elaborate platform layouts (multiple tiers, connected platforms)
 - [ ] Background music (SFX already done, see "Known limitations" above)
 - [ ] In-game key-rebinding UI (input map already supports it)
