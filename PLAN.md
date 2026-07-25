@@ -43,10 +43,40 @@ reasoning.
 - Procedurally generated arena each match: randomized wall segments,
   crates, columns, plus 2 elevated platforms with ramps up (real
   verticality — see notes below on why ramps not discrete stairs).
-- Basic HUD: health, head-size %, kill feed, hit-marker flash, muzzle
-  flash + tracer VFX on fire.
+- HUD: health, head-size %, kill feed (now with real player names), hit-marker
+  flash, muzzle flash + tracer VFX on fire, match countdown timer,
+  toggleable scoreboard (Tab), game-over screen with final scores and
+  restart prompt (R).
 - Server-authoritative multiplayer wiring in place (single local host only
   right now, no real remote peers).
+- **Match structure & scoring**: classic FFA deathmatch — first to
+  `Constants.MATCH_KILL_LIMIT` (15) kills or `Constants.MATCH_TIME_LIMIT`
+  (5 min) wins, whichever comes first. `GameManager.gd` tracks per-player
+  `scores` (kills/deaths) keyed by a new `Character.player_id` (assigned at
+  spawn — distinct from multiplayer authority, which stays 1 for everyone
+  in Stage 1 and can't tell characters apart). `GameManager.match_over`
+  freezes further damage (checked in `HealthComponent.take_damage` and
+  `WeaponHitscan.try_fire`) once the match ends. Restarting
+  (`Main.restart_match()`) clears characters, swaps in a fresh procedurally
+  generated `Arena` instance, and resets `GameManager` state — deliberately
+  avoids touching `NetworkManager`/`reload_current_scene()` to sidestep any
+  ENet port-rebind risk.
+- Chain-explosion kills already correctly attribute to the original
+  killer, however many hops deep (verified directly: shoot A, A's death
+  explosion kills B, both kills credit the original shooter) — the
+  `killer_player_id` is baked into each `Explosion.configure()` call and
+  carries through the whole cascade. Confirmed intentional: the original
+  killer is *not* immune to their own chain, so standing too close to a
+  kill you just landed can still kill you too (kept as-is by request —
+  real risk/reward, not a bug).
+- `Constants.MATCH_TIME_LIMIT` currently set to **30s** (was 5 min) for
+  fast iteration/testing — bump back up before any real playtest.
+- **Spawn safety**: `GameManager.get_next_spawn_point()` now picks whichever
+  spawn point is farthest from the nearest living enemy, instead of blindly
+  round-robining — no more respawning right next to (or facing) someone
+  already there. Falls back to round-robin when nobody's alive yet (initial
+  match spawns). `RespawnComponent` passes its own `player_id` so a
+  respawning character doesn't count itself as a threat.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -109,18 +139,14 @@ Full audit done via `/plan`; recommended priority order below (not a
 commitment, just a suggested order).
 
 **Tier 1 — core game gaps (highest impact):**
-- [ ] Win/lose condition or match structure — right now it runs forever
-      with no round timer, kill-limit, or end state. `GameManager.gd`
-      tracks nothing beyond spawn bookkeeping. Biggest single gap.
-- [ ] Scoreboard/persistent score — `HUD.gd`'s kill feed is transient
-      (fades after 5s), no running per-player kill/death tally.
+- [x] Win/lose condition or match structure — done, see "Done so far" above.
+- [x] Scoreboard/persistent score — done, see "Done so far" above.
 - [ ] Ammo/reload system — `WeaponHitscan.gd` only has a fire cooldown,
-      infinite ammo forever.
-- [ ] Spawn safety — `GameManager.get_next_spawn_point()` round-robins
-      blindly, no check for nearby enemies before dropping you in.
+	  infinite ammo forever.
+- [x] Spawn safety — done, see "Done so far" above.
 - [ ] Death/spectator feedback — `RespawnComponent.begin_respawn_countdown()`
-      just hides the character; no "You died"/"Killed by X" message, no
-      death animation, no spectator camera during the 3s respawn delay.
+	  just hides the character; no "You died"/"Killed by X" message, no
+	  death animation, no spectator camera during the 3s respawn delay.
 
 **Tier 2 — expected baseline polish** (see "Known limitations" above):
 sound, main menu, pause menu, settings/options UI, restart-match flow.
@@ -134,16 +160,16 @@ additional game modes (currently implicit free-for-all).
 Nothing here is committed to — just candidates to pick from next session.
 
 - [ ] **Noise-based terrain (rolling hills)** — fully designed, not yet
-      built. Full plan at `/home/marko/.claude/plans/logical-bubbling-flute.md`
-      (until overwritten by a future `/plan` — worth copying into this file
-      or a dedicated doc before that happens if it's not built soon).
+	  built. Full plan at `/home/marko/.claude/plans/logical-bubbling-flute.md`
+	  (until overwritten by a future `/plan` — worth copying into this file
+	  or a dedicated doc before that happens if it's not built soon).
       Short version: `FastNoiseLite` + `HeightMapShape3D`, single static
       mesh built once per match (not chunked — arena is bounded, ~100x100),
       flatten patches under spawn points/walls/platforms so existing
-      obstacle logic keeps working, biggest open risk is whether Godot's
-      navmesh baker parses `HeightMapShape3D` correctly (plan includes a
-      spike step to validate that first, with a mesh-instance-parsing
-      fallback if not).
+	  obstacle logic keeps working, biggest open risk is whether Godot's
+	  navmesh baker parses `HeightMapShape3D` correctly (plan includes a
+	  spike step to validate that first, with a mesh-instance-parsing
+	  fallback if not).
 - [ ] Stage 2: local multiplayer (split-screen/hotseat)
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [ ] Sound (weapon fire, explosion, footsteps, ambient)
@@ -151,5 +177,5 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] More weapon variety
 - [ ] Headshot damage multiplier
 - [ ] Visual stairs (decorative Kenney stair mesh over the existing ramp
-      collision) instead of a plain primitive ramp
+	  collision) instead of a plain primitive ramp
 - [ ] More elaborate platform layouts (multiple tiers, connected platforms)

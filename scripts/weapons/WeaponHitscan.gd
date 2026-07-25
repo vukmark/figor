@@ -30,7 +30,7 @@ func _process(delta: float) -> void:
 ## this always runs on the server) — resolves the shot and applies damage
 ## directly rather than trusting any client-side aim.
 func try_fire() -> void:
-	if _cooldown_remaining > 0.0 or _character == null:
+	if _cooldown_remaining > 0.0 or _character == null or GameManager.match_over:
 		return
 	_cooldown_remaining = cooldown
 
@@ -57,7 +57,7 @@ func try_fire() -> void:
 	fired.emit(result.position, true)
 	var collider: Object = result.collider
 	if collider is Character and collider != _character:
-		collider.health.take_damage(damage, _character.get_multiplayer_authority())
+		collider.health.take_damage(damage, _character.player_id)
 		hit_character.emit()
 
 

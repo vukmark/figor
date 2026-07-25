@@ -15,6 +15,12 @@ extends CharacterBody3D
 var input_provider: InputProvider
 var knockback_velocity := Vector3.ZERO
 
+## Identity for scoring/display — distinct from multiplayer authority
+## (network ownership), which is always 1 for every character in Stage 1
+## and can't tell characters apart. Assigned by GameManager at spawn.
+var player_id: int = -1
+var display_name: String = ""
+
 var _gravity_velocity := 0.0
 
 
@@ -106,11 +112,11 @@ func apply_external_impulse(impulse: Vector3) -> void:
 	knockback_velocity += impulse
 
 
-func _on_died(killer_peer_id: int) -> void:
+func _on_died(killer_player_id: int) -> void:
 	if not is_multiplayer_authority():
 		return
 	var ratio := head_growth.get_head_scale_ratio()
-	GameManager.spawn_explosion(global_transform.origin, ratio, killer_peer_id, get_multiplayer_authority())
+	GameManager.spawn_explosion(global_transform.origin, ratio, killer_player_id, player_id)
 	respawn.begin_respawn_countdown()
 
 

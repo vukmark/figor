@@ -3,7 +3,7 @@ extends Node
 
 @export var respawn_delay := Constants.RESPAWN_DELAY
 
-var _character: CharacterBody3D
+var _character: Character
 var _health: HealthComponent
 var _head_growth: HeadGrowth
 var _timer: Timer
@@ -30,7 +30,7 @@ func begin_respawn_countdown() -> void:
 
 
 func _do_respawn() -> void:
-	var spawn_point: Node3D = GameManager.get_next_spawn_point()
+	var spawn_point: Node3D = GameManager.get_next_spawn_point(_character.player_id)
 	if spawn_point:
 		_character.global_transform = spawn_point.global_transform
 	_health.reset()

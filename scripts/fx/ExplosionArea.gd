@@ -11,7 +11,7 @@ var _detonated := false
 
 ## Called once by GameManager right after instancing, before this node has
 ## necessarily entered the tree's physics step.
-func configure(head_scale_ratio: float, killer_peer_id: int, victim_peer_id: int) -> void:
+func configure(head_scale_ratio: float, killer_player_id: int, victim_player_id: int) -> void:
 	var radius: float = Constants.EXPLOSION_BASE_RADIUS * lerp(1.0, Constants.EXPLOSION_MAX_RADIUS_MULT, head_scale_ratio)
 	var damage: float = Constants.EXPLOSION_BASE_DAMAGE * lerp(1.0, Constants.EXPLOSION_MAX_DAMAGE_MULT, head_scale_ratio)
 	var force: float = Constants.EXPLOSION_BASE_FORCE * lerp(1.0, Constants.EXPLOSION_MAX_FORCE_MULT, head_scale_ratio)
@@ -22,8 +22,8 @@ func configure(head_scale_ratio: float, killer_peer_id: int, victim_peer_id: int
 	set_meta("radius", radius)
 	set_meta("damage", damage)
 	set_meta("force", force)
-	set_meta("killer_peer_id", killer_peer_id)
-	set_meta("victim_peer_id", victim_peer_id)
+	set_meta("killer_player_id", killer_player_id)
+	set_meta("victim_player_id", victim_player_id)
 
 
 func _ready() -> void:
@@ -44,7 +44,7 @@ func _detonate() -> void:
 	var radius: float = get_meta("radius", Constants.EXPLOSION_BASE_RADIUS)
 	var damage: float = get_meta("damage", Constants.EXPLOSION_BASE_DAMAGE)
 	var force: float = get_meta("force", Constants.EXPLOSION_BASE_FORCE)
-	var killer_peer_id: int = get_meta("killer_peer_id", -1)
+	var killer_player_id: int = get_meta("killer_player_id", -1)
 
 	for body in area.get_overlapping_bodies():
 		if body is Character and body.health.is_alive:
@@ -53,7 +53,7 @@ func _detonate() -> void:
 			var falloff: float = clamp(1.0 - dist / radius, 0.0, 1.0)
 			if falloff <= 0.0:
 				continue
-			body.health.take_damage(damage * falloff, killer_peer_id)
+			body.health.take_damage(damage * falloff, killer_player_id)
 			if body.health.is_alive:
 				var direction: Vector3 = offset.normalized() if dist > 0.001 else Vector3.UP
 				body.apply_external_impulse(direction * force * falloff)
