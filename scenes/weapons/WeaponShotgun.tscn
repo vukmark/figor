@@ -1,0 +1,20 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/WeaponShotgun.gd" id="1"]
+[ext_resource type="PackedScene" path="res://assets/kenney/weapons/Models/blaster-f.glb" id="2"]
+[ext_resource type="AudioStream" path="res://assets/kenney/audio/scifi/Audio/laserRetro_000.ogg" id="3"]
+[ext_resource type="AudioStream" path="res://assets/kenney/audio/scifi/Audio/doorClose_000.ogg" id="4"]
+[ext_resource type="AudioStream" path="res://assets/kenney/audio/impact/Audio/impactMetal_medium_000.ogg" id="5"]
+
+[node name="WeaponShotgun" type="Node3D"]
+script = ExtResource("1")
+display_name = "Shotgun"
+weapon_range = 18.0
+cooldown = 0.9
+magazine_size = 2
+reload_time = 2.2
+fire_sound = ExtResource("3")
+reload_sound = ExtResource("4")
+hit_sounds = [ExtResource("5")]
+
+[node name="Model" parent="." instance=ExtResource("2")]

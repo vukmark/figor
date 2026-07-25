@@ -33,4 +33,5 @@ func get_input_command() -> InputCommand:
 	cmd.fire_pressed = Input.is_action_pressed("fire")
 	cmd.jump_pressed = Input.is_action_just_pressed("jump")
 	cmd.sprint_pressed = Input.is_action_pressed("sprint")
+	cmd.switch_weapon_pressed = Input.is_action_just_pressed("switch_weapon")
 	return cmd

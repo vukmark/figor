@@ -223,6 +223,34 @@ reasoning.
   directly by firing at a target's head-hitbox world position vs. its torso
   in a headless test: 28 damage (2x14) on the head, 14 on the body, exactly
   as expected.
+- **More weapon variety**: extracted shared cooldown/reload/ammo/muzzle-
+  flash/tracer/headshot machinery out of `WeaponHitscan.gd` into a new
+  `scripts/weapons/WeaponBase.gd`, leaving each concrete weapon to only
+  implement `_resolve_shot()` — worth doing once there were two real
+  weapons sharing ~150 lines of near-identical logic. Added
+  `scripts/weapons/WeaponShotgun.gd`/`scenes/weapons/WeaponShotgun.tscn`: 6
+  independent pellet rays per trigger pull spread across an 8° cone (via
+  `tan()` of a random angle, not a random offset vector, so pellets land
+  in an even disc rather than clustering toward center), 5 damage each (30
+  max per shot before headshots), 18-unit range (vs. the blaster's 100),
+  0.9s cooldown, 2-round magazine, 2.2s reload — a close-range burst
+  alternative to the blaster's reliable long-range single shot. Both
+  weapons now live permanently as children of `WeaponMount` (no pickup/
+  inventory system); `Character.gd` tracks `_active_weapon_index`, toggles
+  visibility between them, and switches on a new `switch_weapon` input
+  action (Q) via a new `weapon_switched` signal that `HUD.gd` listens to,
+  re-targeting its ammo/hit-marker signal connections and updating the
+  ammo label's weapon-name prefix immediately on switch (connects to every
+  weapon's signals up front since only the active one ever actually fires,
+  so no dynamic connect/disconnect juggling needed). Bots never switch
+  (their input command never sets `switch_weapon_pressed`), so they stay
+  on the blaster by design — not considered unfair since bot AI is
+  intentionally simple. Verified directly in a headless test: switching
+  toggles the correct weapon's visibility/active state, a point-blank
+  shotgun blast on a target's torso dealt 25 damage (5 of 6 pellets
+  landed, consistent with the spread cone), ammo dropped by exactly 1 per
+  trigger pull despite firing 6 rays, and the magazine correctly
+  auto-reloaded after the 2nd shot emptied it.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -270,7 +298,6 @@ regresses):
 - Ramps use smooth inclined-box collision, not literal Kenney stair meshes
   with discrete steps (discrete step colliders risk snagging
   player/bot movement — this was a deliberate tradeoff, see notes above).
-- Only 1 weapon type (hitscan).
 - Bot patrol has a 30% chance to target a platform directly (otherwise
   platforms would almost never see traffic in a large arena) — this is a
   bit of a hack; a nicer long-term fix would be genuine points-of-interest
@@ -312,7 +339,7 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] Stage 2: local multiplayer (split-screen/hotseat)
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [x] Headshot damage multiplier — done, see "Done so far" above.
-- [ ] More weapon variety
+- [x] More weapon variety — done, see "Done so far" above.
 - [ ] Visual stairs (decorative Kenney stair mesh over the existing ramp
 	  collision) instead of a plain primitive ramp
 - [ ] More elaborate platform layouts (multiple tiers, connected platforms)

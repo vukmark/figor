@@ -12,8 +12,14 @@ extends CharacterBody3D
 @onready var nav_agent: NavigationAgent3D = $NavigationAgent3D
 @onready var head_hitbox: CollisionShape3D = $HeadHitbox
 
+## Fired whenever the active weapon slot changes, so listeners (HUD ammo
+## display) can re-target which weapon's signals they're reading from
+## instead of re-polling every frame.
+signal weapon_switched(weapon: Node)
+
 var input_provider: InputProvider
 var knockback_velocity := Vector3.ZERO
+var _active_weapon_index := 0
 
 ## Identity for scoring/display — distinct from multiplayer authority
 ## (network ownership), which is always 1 for every character in Stage 1
@@ -53,6 +59,21 @@ func _ready() -> void:
 	head_growth.set_head_hitbox(head_hitbox)
 
 	_update_camera_active()
+	_update_weapon_visibility()
+
+
+## Only the active weapon slot is visible/usable at a time — every weapon a
+## character owns lives permanently under WeaponMount (no pickup/inventory
+## system), so switching is just moving which index counts as "active."
+func _update_weapon_visibility() -> void:
+	for i in range(weapon_mount.get_child_count()):
+		weapon_mount.get_child(i).visible = i == _active_weapon_index
+
+
+func get_active_weapon() -> Node:
+	if weapon_mount.get_child_count() == 0:
+		return null
+	return weapon_mount.get_child(_active_weapon_index)
 
 
 func set_input_provider(provider: InputProvider) -> void:
@@ -118,9 +139,14 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	_update_footsteps(delta)
 
-	if cmd.fire_pressed and weapon_mount.get_child_count() > 0:
-		var weapon: Node = weapon_mount.get_child(0)
-		if weapon.has_method("try_fire"):
+	if cmd.switch_weapon_pressed and weapon_mount.get_child_count() > 1:
+		_active_weapon_index = (_active_weapon_index + 1) % weapon_mount.get_child_count()
+		_update_weapon_visibility()
+		weapon_switched.emit(get_active_weapon())
+
+	if cmd.fire_pressed:
+		var weapon: Node = get_active_weapon()
+		if weapon and weapon.has_method("try_fire"):
 			weapon.try_fire()
 
 

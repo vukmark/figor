@@ -30,6 +30,7 @@ const CLICK_SOUND: AudioStream = preload("res://assets/kenney/audio/interface/Au
 var _local_character: Character
 var _death_countdown := 0.0
 var _death_reason_text := ""
+var _active_weapon_name := ""
 
 
 func _ready() -> void:
@@ -71,13 +72,18 @@ func _process(_delta: float) -> void:
 	if _local_character == null or not is_instance_valid(_local_character):
 		_local_character = _find_local_character()
 		if _local_character:
-			var weapon: Node = _local_character.weapon_mount.get_child(0)
-			if weapon and weapon.has_signal("hit_character"):
-				weapon.hit_character.connect(_on_hit_character)
-			if weapon and weapon.has_signal("ammo_changed"):
-				weapon.ammo_changed.connect(_on_ammo_changed)
-				weapon.reload_started.connect(_on_reload_started)
-				_on_ammo_changed(weapon.current_ammo, weapon.magazine_size)
+			# Every weapon a character owns is a permanent child (no pickup
+			# system — see Character._update_weapon_visibility), so hooking
+			# all of them up front covers every weapon the player will ever
+			# switch to; only the active one ever actually fires or reloads.
+			for weapon in _local_character.weapon_mount.get_children():
+				if weapon.has_signal("hit_character"):
+					weapon.hit_character.connect(_on_hit_character)
+				if weapon.has_signal("ammo_changed"):
+					weapon.ammo_changed.connect(_on_ammo_changed)
+					weapon.reload_started.connect(_on_reload_started)
+			_local_character.weapon_switched.connect(_on_weapon_switched)
+			_on_weapon_switched(_local_character.get_active_weapon())
 	else:
 		health_bar.max_value = _local_character.health.max_health
 		health_bar.value = _local_character.health.current_health
@@ -148,11 +154,18 @@ func _on_hit_character() -> void:
 
 
 func _on_ammo_changed(current: int, max_ammo: int) -> void:
-	ammo_label.text = "Ammo: %d/%d" % [current, max_ammo]
+	ammo_label.text = "%s — Ammo: %d/%d" % [_active_weapon_name, current, max_ammo]
 
 
 func _on_reload_started(_reload_time: float) -> void:
-	ammo_label.text = "Reloading..."
+	ammo_label.text = "%s — Reloading..." % _active_weapon_name
+
+
+func _on_weapon_switched(weapon: Node) -> void:
+	if weapon == null:
+		return
+	_active_weapon_name = weapon.display_name if "display_name" in weapon else ""
+	_on_ammo_changed(weapon.current_ammo, weapon.magazine_size)
 
 
 func _find_local_character() -> Character:

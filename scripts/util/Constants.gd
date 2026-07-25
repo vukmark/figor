@@ -41,6 +41,18 @@ const WEAPON_RELOAD_TIME := 1.8
 ## reward makes aiming for it worthwhile even before it's grown much.
 const HEADSHOT_DAMAGE_MULTIPLIER := 2.0
 
+## Close-range burst alternative to the hitscan blaster: short range and
+## wide pellet spread mean most pellets miss beyond a few meters, but every
+## pellet that lands up close adds up fast (6 * 5.0 = 30 max per shot,
+## before headshots, vs. the blaster's single 14).
+const SHOTGUN_PELLET_COUNT := 6
+const SHOTGUN_PELLET_DAMAGE := 5.0
+const SHOTGUN_SPREAD_DEGREES := 8.0
+const SHOTGUN_RANGE := 18.0
+const SHOTGUN_COOLDOWN := 0.9
+const SHOTGUN_MAGAZINE_SIZE := 2
+const SHOTGUN_RELOAD_TIME := 2.2
+
 ## At ratio=1.0 (fully grown head) the radius/damage below are tuned to
 ## realistically wipe out most/all of the 100x100 arena — anyone within
 ## ~65 units of the blast is guaranteed lethal damage even after falloff,
