@@ -20,7 +20,7 @@ const GRAVITY := 9.8
 ## target while you're carrying it around.
 const HEAD_MIN_SPEED_MULTIPLIER := 0.5
 
-const CAMERA_MOUSE_SENSITIVITY := 0.003
+## Mouse sensitivity is user-configurable — see the Settings autoload.
 const CAMERA_PITCH_MIN := -80.0
 const CAMERA_PITCH_MAX := 80.0
 

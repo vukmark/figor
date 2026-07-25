@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/menu/MainMenu.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/menu/SettingsPanel.tscn" id="2"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -41,6 +42,13 @@ layout_mode = 2
 layout_mode = 2
 text = "Start Match"
 
+[node name="SettingsButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Settings"
+
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Quit"
+
+[node name="SettingsPanel" parent="." instance=ExtResource("2")]
+visible = false

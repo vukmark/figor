@@ -18,8 +18,8 @@ func _input(event: InputEvent) -> void:
 	if not is_locally_controlled:
 		return
 	if event is InputEventMouseMotion:
-		_accumulated_look.x -= event.relative.x * Constants.CAMERA_MOUSE_SENSITIVITY
-		_accumulated_look.y -= event.relative.y * Constants.CAMERA_MOUSE_SENSITIVITY
+		_accumulated_look.x -= event.relative.x * Settings.mouse_sensitivity
+		_accumulated_look.y -= event.relative.y * Settings.mouse_sensitivity
 
 
 func get_input_command() -> InputCommand:

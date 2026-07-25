@@ -106,6 +106,23 @@ reasoning.
   unconditionally, which throws when no peer is assigned at all (e.g. idle
   at the main menu after `close_peer()`) — both now check
   `multiplayer.has_multiplayer_peer()` first.
+- **Pause menu & settings**: new `Settings` autoload
+  (`autoload/Settings.gd`) holds `mouse_sensitivity` and `master_volume`,
+  persisted to `user://settings.cfg` via `ConfigFile`. `mouse_sensitivity`
+  moved out of `Constants.gd` (was a fixed const, now user-configurable);
+  `master_volume` drives the "Master" `AudioServer` bus directly (works
+  correctly even before any actual sound effects exist — see Tier 2 sound,
+  still pending). A single reusable `scenes/menu/SettingsPanel.tscn` (two
+  sliders + Back) is used both from `MainMenu` and the new in-match pause
+  menu, so there's one settings implementation, not two. Pause (**Esc**)
+  toggles `get_tree().paused` — `HUD.gd` sets its own `process_mode` to
+  `PROCESS_MODE_ALWAYS` so the pause menu keeps responding while paused;
+  every other gameplay node (`Character`, bots, `Timer`s) stays on the
+  default `PROCESS_MODE_INHERIT`, so pausing freezes movement/AI/countdowns
+  automatically with no per-node changes needed. Verified directly:
+  pausing freezes a bot's position and the match timer exactly, resume
+  unfreezes both, and settings changes apply live and persist across a
+  reload.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -149,7 +166,7 @@ regresses):
 ## Known limitations / things not done
 
 - No audio at all (no sound assets were ever added).
-- No pause menu, no settings/options UI (sensitivity, volume, key rebinding).
+- No in-game key-rebinding UI (the input map itself supports it already).
 - Ramps use smooth inclined-box collision, not literal Kenney stair meshes
   with discrete steps (discrete step colliders risk snagging
   player/bot movement — this was a deliberate tradeoff, see notes above).
@@ -177,8 +194,11 @@ commitment, just a suggested order).
 
 **Tier 2 — expected baseline polish:**
 - [x] Main menu — done, see "Done so far" above.
-- [ ] Pause menu
-- [ ] Settings/options UI (sensitivity, volume, key rebinding)
+- [x] Pause menu — done, see "Done so far" above.
+- [x] Settings/options UI (sensitivity, volume) — done, see "Done so far"
+	  above. Key rebinding UI not included (the input map itself already
+	  supports rebinding, just no in-game UI for it) — left for later if
+	  wanted.
 - [ ] Sound (weapon fire, explosion, footsteps, ambient) — see "Known
 	  limitations" above.
 

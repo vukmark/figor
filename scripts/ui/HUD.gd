@@ -19,6 +19,12 @@ const HIT_MARKER_FLASH_TIME := 0.15
 @onready var game_over_rows: VBoxContainer = $GameOverPanel/VBoxContainer/Rows
 @onready var death_overlay: Control = $DeathOverlay
 @onready var death_label: Label = $DeathOverlay/DeathLabel
+@onready var pause_panel: Control = $PauseMenuPanel
+@onready var pause_settings_panel: Control = $PauseSettingsPanel
+@onready var resume_button: Button = $PauseMenuPanel/VBoxContainer/ResumeButton
+@onready var pause_settings_button: Button = $PauseMenuPanel/VBoxContainer/SettingsButton
+@onready var pause_main_menu_button: Button = $PauseMenuPanel/VBoxContainer/MainMenuButton
+@onready var pause_quit_button: Button = $PauseMenuPanel/VBoxContainer/QuitButton
 
 var _local_character: Character
 var _death_countdown := 0.0
@@ -26,12 +32,26 @@ var _death_reason_text := ""
 
 
 func _ready() -> void:
+	# HUD needs to keep responding (pause menu, settings) while the rest of
+	# the tree is frozen by get_tree().paused — everything else in the game
+	# world stays on the default PROCESS_MODE_INHERIT, so pausing freezes
+	# gameplay/bots/timers automatically without any changes there.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
 	GameManager.character_died.connect(_on_character_died)
 	GameManager.match_ended.connect(_on_match_ended)
 	GameManager.scores_changed.connect(_refresh_scoreboard)
 	scoreboard_panel.visible = false
 	game_over_panel.visible = false
 	death_overlay.visible = false
+
+	pause_panel.visible = false
+	pause_settings_panel.visible = false
+	resume_button.pressed.connect(_toggle_pause)
+	pause_settings_button.pressed.connect(_on_pause_settings_pressed)
+	pause_settings_panel.closed.connect(_on_pause_settings_closed)
+	pause_main_menu_button.pressed.connect(_on_pause_main_menu_pressed)
+	pause_quit_button.pressed.connect(func() -> void: get_tree().quit())
 
 
 func _process(_delta: float) -> void:
@@ -69,7 +89,37 @@ func _process(_delta: float) -> void:
 	else:
 		if game_over_panel.visible:
 			game_over_panel.visible = false
-		scoreboard_panel.visible = Input.is_action_pressed("toggle_scoreboard")
+		if Input.is_action_just_pressed("pause"):
+			_toggle_pause()
+		if not get_tree().paused:
+			scoreboard_panel.visible = Input.is_action_pressed("toggle_scoreboard")
+
+
+func _toggle_pause() -> void:
+	get_tree().paused = not get_tree().paused
+	pause_panel.visible = get_tree().paused
+	if get_tree().paused:
+		pause_settings_panel.visible = false
+		scoreboard_panel.visible = false
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _on_pause_settings_pressed() -> void:
+	pause_panel.visible = false
+	pause_settings_panel.visible = true
+
+
+func _on_pause_settings_closed() -> void:
+	pause_settings_panel.visible = false
+	pause_panel.visible = true
+
+
+func _on_pause_main_menu_pressed() -> void:
+	get_tree().paused = false
+	NetworkManager.close_peer()
+	get_tree().change_scene_to_file("res://scenes/menu/MainMenu.tscn")
 
 
 ## Brief crosshair flash confirming a shot actually landed on someone —
