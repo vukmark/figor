@@ -1,10 +1,13 @@
 # Figor — Project Plan & Status
 
 Living document. Update this as we go — it tracks what's done, what's in
-progress, and what's next. See also `/home/marko/.claude/plans/logical-bubbling-flute.md`
-for the original Stage 1 architecture plan (folder structure, scene
-architecture, multiplayer authority model reasoning) — this file is the
-day-to-day tracker, that one is the original design doc.
+progress, and what's next.
+
+Note: `/home/marko/.claude/plans/logical-bubbling-flute.md` is Claude Code's
+plan-mode scratch file — it gets *overwritten* every time a new `/plan`
+session runs, so it only ever holds the most recently drafted plan (currently:
+noise-based terrain, see backlog below), not a history. Anything worth
+keeping long-term belongs here instead.
 
 ## Concept
 
@@ -100,10 +103,47 @@ regresses):
   bit of a hack; a nicer long-term fix would be genuine points-of-interest
   weighting.
 
+## Gap audit — what's missing from "a complete game"
+
+Full audit done via `/plan`; recommended priority order below (not a
+commitment, just a suggested order).
+
+**Tier 1 — core game gaps (highest impact):**
+- [ ] Win/lose condition or match structure — right now it runs forever
+      with no round timer, kill-limit, or end state. `GameManager.gd`
+      tracks nothing beyond spawn bookkeeping. Biggest single gap.
+- [ ] Scoreboard/persistent score — `HUD.gd`'s kill feed is transient
+      (fades after 5s), no running per-player kill/death tally.
+- [ ] Ammo/reload system — `WeaponHitscan.gd` only has a fire cooldown,
+      infinite ammo forever.
+- [ ] Spawn safety — `GameManager.get_next_spawn_point()` round-robins
+      blindly, no check for nearby enemies before dropping you in.
+- [ ] Death/spectator feedback — `RespawnComponent.begin_respawn_countdown()`
+      just hides the character; no "You died"/"Killed by X" message, no
+      death animation, no spectator camera during the 3s respawn delay.
+
+**Tier 2 — expected baseline polish** (see "Known limitations" above):
+sound, main menu, pause menu, settings/options UI, restart-match flow.
+
+**Tier 3 — lower priority, genre-typical:** minimap/radar, directional
+damage indicator, player customization/skins, accessibility options,
+additional game modes (currently implicit free-for-all).
+
 ## Backlog / possible next steps
 
 Nothing here is committed to — just candidates to pick from next session.
 
+- [ ] **Noise-based terrain (rolling hills)** — fully designed, not yet
+      built. Full plan at `/home/marko/.claude/plans/logical-bubbling-flute.md`
+      (until overwritten by a future `/plan` — worth copying into this file
+      or a dedicated doc before that happens if it's not built soon).
+      Short version: `FastNoiseLite` + `HeightMapShape3D`, single static
+      mesh built once per match (not chunked — arena is bounded, ~100x100),
+      flatten patches under spawn points/walls/platforms so existing
+      obstacle logic keeps working, biggest open risk is whether Godot's
+      navmesh baker parses `HeightMapShape3D` correctly (plan includes a
+      spike step to validate that first, with a mesh-instance-parsing
+      fallback if not).
 - [ ] Stage 2: local multiplayer (split-screen/hotseat)
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [ ] Sound (weapon fire, explosion, footsteps, ambient)
