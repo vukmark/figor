@@ -6,6 +6,9 @@ signal fired(hit_position: Vector3, did_hit: bool)
 ## `fired` so listeners (e.g. a hit-marker on the HUD) don't need to inspect
 ## the hit collider themselves.
 signal hit_character()
+## Ammo state, for a HUD counter to listen to.
+signal ammo_changed(current: int, max_ammo: int)
+signal reload_started(reload_time: float)
 
 const TRACER_LIFETIME := 0.08
 const MUZZLE_FLASH_LIFETIME := 0.05
@@ -13,26 +16,48 @@ const MUZZLE_FLASH_LIFETIME := 0.05
 @export var damage := Constants.WEAPON_DAMAGE
 @export var weapon_range := Constants.WEAPON_RANGE
 @export var cooldown := Constants.WEAPON_COOLDOWN
+@export var magazine_size := Constants.WEAPON_MAGAZINE_SIZE
+@export var reload_time := Constants.WEAPON_RELOAD_TIME
+
+var current_ammo: int
+var is_reloading := false
 
 var _cooldown_remaining := 0.0
+var _reload_time_remaining := 0.0
 var _character: Character
 
 
 func _ready() -> void:
 	_character = _find_character(self)
+	current_ammo = magazine_size
 
 
 func _process(delta: float) -> void:
 	_cooldown_remaining = max(_cooldown_remaining - delta, 0.0)
 
+	if is_reloading:
+		_reload_time_remaining -= delta
+		if _reload_time_remaining <= 0.0:
+			is_reloading = false
+			current_ammo = magazine_size
+			ammo_changed.emit(current_ammo, magazine_size)
+
 
 ## Server-side only in practice (Stage 1 authority owns every Character, so
 ## this always runs on the server) — resolves the shot and applies damage
-## directly rather than trusting any client-side aim.
+## directly rather than trusting any client-side aim. No manual reload input:
+## the magazine auto-reloads the instant it empties, which works identically
+## for the player and bots without any bot-side special-casing.
 func try_fire() -> void:
-	if _cooldown_remaining > 0.0 or _character == null or GameManager.match_over:
+	if _cooldown_remaining > 0.0 or _character == null or GameManager.match_over or is_reloading:
 		return
+	if current_ammo <= 0:
+		_start_reload()
+		return
+
 	_cooldown_remaining = cooldown
+	current_ammo -= 1
+	ammo_changed.emit(current_ammo, magazine_size)
 
 	var cam := _character.camera
 	var from := cam.global_transform.origin
@@ -59,6 +84,12 @@ func try_fire() -> void:
 	if collider is Character and collider != _character:
 		collider.health.take_damage(damage, _character.player_id)
 		hit_character.emit()
+
+
+func _start_reload() -> void:
+	is_reloading = true
+	_reload_time_remaining = reload_time
+	reload_started.emit(reload_time)
 
 
 func _spawn_muzzle_flash() -> void:

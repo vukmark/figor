@@ -11,6 +11,7 @@ const HIT_MARKER_FLASH_TIME := 0.15
 @onready var kill_feed: VBoxContainer = $KillFeed
 @onready var crosshair: Label = $Crosshair
 @onready var timer_label: Label = $MatchTimerLabel
+@onready var ammo_label: Label = $AmmoLabel
 @onready var scoreboard_panel: Control = $ScoreboardPanel
 @onready var scoreboard_rows: VBoxContainer = $ScoreboardPanel/VBoxContainer/Rows
 @onready var game_over_panel: Control = $GameOverPanel
@@ -35,6 +36,10 @@ func _process(_delta: float) -> void:
 			var weapon: Node = _local_character.weapon_mount.get_child(0)
 			if weapon and weapon.has_signal("hit_character"):
 				weapon.hit_character.connect(_on_hit_character)
+			if weapon and weapon.has_signal("ammo_changed"):
+				weapon.ammo_changed.connect(_on_ammo_changed)
+				weapon.reload_started.connect(_on_reload_started)
+				_on_ammo_changed(weapon.current_ammo, weapon.magazine_size)
 	else:
 		health_bar.max_value = _local_character.health.max_health
 		health_bar.value = _local_character.health.current_health
@@ -63,6 +68,14 @@ func _on_hit_character() -> void:
 		if is_instance_valid(crosshair):
 			crosshair.remove_theme_color_override("font_color")
 	)
+
+
+func _on_ammo_changed(current: int, max_ammo: int) -> void:
+	ammo_label.text = "Ammo: %d/%d" % [current, max_ammo]
+
+
+func _on_reload_started(_reload_time: float) -> void:
+	ammo_label.text = "Reloading..."
 
 
 func _find_local_character() -> Character:

@@ -77,6 +77,14 @@ reasoning.
   already there. Falls back to round-robin when nobody's alive yet (initial
   match spawns). `RespawnComponent` passes its own `player_id` so a
   respawning character doesn't count itself as a threat.
+- **Ammo/reload**: `WeaponHitscan.gd` now has a magazine (`Constants.WEAPON_MAGAZINE_SIZE`
+  = 8, tuned so a full mag roughly equals one kill from full HP if every
+  shot lands) and auto-reload (`Constants.WEAPON_RELOAD_TIME` = 1.8s) — no
+  manual reload key; the magazine starts reloading automatically on the
+  next fire attempt after it empties, which works identically for the
+  player and bots with zero bot-side special-casing. Firing is blocked
+  while `is_reloading` is true. HUD shows an ammo counter (`current/max`)
+  that switches to "Reloading..." during reload.
 
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
@@ -141,8 +149,7 @@ commitment, just a suggested order).
 **Tier 1 — core game gaps (highest impact):**
 - [x] Win/lose condition or match structure — done, see "Done so far" above.
 - [x] Scoreboard/persistent score — done, see "Done so far" above.
-- [ ] Ammo/reload system — `WeaponHitscan.gd` only has a fire cooldown,
-	  infinite ammo forever.
+- [x] Ammo/reload system — done, see "Done so far" above.
 - [x] Spawn safety — done, see "Done so far" above.
 - [ ] Death/spectator feedback — `RespawnComponent.begin_respawn_countdown()`
 	  just hides the character; no "You died"/"Killed by X" message, no

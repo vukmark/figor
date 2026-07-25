@@ -32,6 +32,10 @@ const HEALTH_MAX := 100.0
 const WEAPON_DAMAGE := 14.0
 const WEAPON_RANGE := 100.0
 const WEAPON_COOLDOWN := 0.35
+## A full magazine (8 rounds) roughly matches one kill from full HP if every
+## shot lands — miss even one and you're reloading mid-fight.
+const WEAPON_MAGAZINE_SIZE := 8
+const WEAPON_RELOAD_TIME := 1.8
 
 ## At ratio=1.0 (fully grown head) the radius/damage below are tuned to
 ## realistically wipe out most/all of the 100x100 arena — anyone within
