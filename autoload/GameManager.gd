@@ -25,6 +25,10 @@ var match_over := false
 var _spawn_index := 0
 var _next_player_id := 1
 var _bot_number := 0
+## Accumulates real seconds between match-timer broadcasts to clients — see
+## _process() below. Once-a-second is plenty since the HUD only ever
+## displays MM:SS anyway.
+var _time_sync_accum := 0.0
 
 ## Never reset (unlike _next_player_id/_bot_number, which intentionally
 ## restart each match for scoring/display purposes) — guarantees every
@@ -64,6 +68,7 @@ func reset_match() -> void:
 	_next_player_id = 1
 	_bot_number = 0
 	_peer_characters.clear()
+	_time_sync_accum = 0.0
 
 
 func _process(delta: float) -> void:
@@ -73,8 +78,24 @@ func _process(delta: float) -> void:
 	if match_over or not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
 		return
 	match_time_remaining = max(match_time_remaining - delta, 0.0)
+
+	# match_time_remaining is a plain per-instance autoload var, never
+	# synced — a client's own copy never moved from its starting value at
+	# all (confirmed by a real user report: "game time does not count down"
+	# on the client). HUD.gd only ever displays whole seconds (_format_time),
+	# so a once-a-second broadcast loses no visible precision.
+	_time_sync_accum += delta
+	if _time_sync_accum >= 1.0:
+		_time_sync_accum = 0.0
+		_sync_match_time.rpc(match_time_remaining)
+
 	if match_time_remaining <= 0.0:
 		_end_match(_leading_player_id(), "time limit reached")
+
+
+@rpc("authority", "unreliable")
+func _sync_match_time(remaining: float) -> void:
+	match_time_remaining = remaining
 
 
 ## Picks the spawn point farthest from the nearest living enemy, rather than
@@ -179,18 +200,51 @@ func despawn_peer(peer_id: int) -> void:
 func spawn_explosion(pos: Vector3, head_scale_ratio: float, killer_player_id: int, victim_player_id: int) -> void:
 	if not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
 		return
-	if explosion_scene == null or fx_root == null:
-		push_warning("GameManager: explosion_scene or fx_root not set")
-		return
-	var explosion := explosion_scene.instantiate()
-	fx_root.add_child(explosion, true)
-	explosion.global_position = pos
-	if explosion.has_method("configure"):
-		explosion.configure(head_scale_ratio, killer_player_id, victim_player_id)
+
+	_spawn_local_explosion(pos, head_scale_ratio, killer_player_id, victim_player_id)
+	# Every other peer needs to see/hear this too, but NOT via
+	# MultiplayerSpawner replication — see _spawn_local_explosion's doc
+	# comment for why that was actually unreliable, not just theoretically
+	# risky. Broadcasting just the data lets every peer build its own
+	# independent, purely local copy instead.
+	_replay_explosion.rpc(pos, head_scale_ratio, killer_player_id, victim_player_id)
 
 	_record_kill(killer_player_id, victim_player_id)
 	character_died.emit(victim_player_id, killer_player_id)
 	_sync_character_died.rpc(victim_player_id, killer_player_id)
+
+
+## Explosion.tscn's entire lifetime is ~0.2s (LifetimeTimer) — this was
+## originally spawned via MultiplayerSpawner (fx_root.add_child(..., true)),
+## but that's far too short to reliably survive a real spawn+despawn
+## round-trip over any actual network latency. Confirmed by a real user
+## report: the despawn notification routinely arrived at a connected client
+## before it had even finished registering the spawn, corrupting that
+## peer's whole replication cache ("on_despawn_receive ... recv_nodes
+## doesn't have net_id") badly enough to also break unrelated broadcasts
+## like the death/kill message, and make the client's view appear frozen.
+## Giving every explosion a unique name (a first attempt at fixing this)
+## didn't help — the problem was never name collisions, it was relying on
+## MultiplayerSpawner for something this short-lived at all. Fixed by not
+## networking the node itself: every peer independently instantiates its
+## own local-only copy from this same data (a plain add_child, no spawner
+## involved) — ExplosionArea._detonate() gates the actual damage-dealing to
+## multiplayer.is_server(), so only the server's own copy ever affects
+## gameplay; every other peer's copy is purely cosmetic.
+func _spawn_local_explosion(pos: Vector3, head_scale_ratio: float, killer_player_id: int, victim_player_id: int) -> void:
+	if explosion_scene == null or fx_root == null:
+		push_warning("GameManager: explosion_scene or fx_root not set")
+		return
+	var explosion := explosion_scene.instantiate()
+	fx_root.add_child(explosion)
+	explosion.global_position = pos
+	if explosion.has_method("configure"):
+		explosion.configure(head_scale_ratio, killer_player_id, victim_player_id)
+
+
+@rpc("authority", "unreliable")
+func _replay_explosion(pos: Vector3, head_scale_ratio: float, killer_player_id: int, victim_player_id: int) -> void:
+	_spawn_local_explosion(pos, head_scale_ratio, killer_player_id, victim_player_id)
 
 
 func _record_kill(killer_player_id: int, victim_player_id: int) -> void:

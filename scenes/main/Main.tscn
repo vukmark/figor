@@ -19,8 +19,4 @@ spawn_path = NodePath("..")
 
 [node name="FXRoot" type="Node3D" parent="World"]
 
-[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="World/FXRoot"]
-_spawnable_scenes = PackedStringArray("res://scenes/fx/Explosion.tscn")
-spawn_path = NodePath("..")
-
 [node name="HUD" parent="." instance=ExtResource("3")]

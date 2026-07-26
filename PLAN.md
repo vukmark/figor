@@ -578,6 +578,77 @@ additional game modes (currently implicit free-for-all).
     `8/8, is_reloading=false` once the auto-reload completed, matching the
     server's state exactly at both points, with bots (no real owning peer)
     correctly never triggering a sync attempt at all.
+  - **Client froze on death with no "killed by" message, plus match timer
+    never counted down for a client** — three real bugs from one user
+    report, root-caused via the headless repro harness:
+    - **Match timer never synced**: `GameManager.match_time_remaining` is a
+      plain per-instance autoload var, only ever decremented inside the
+      server-only branch of `GameManager._process()` — a client's own copy
+      simply never moved from its starting value. Fixed with a
+      once-a-second `@rpc("authority", "unreliable") _sync_match_time`
+      broadcast (once/sec loses no visible precision since `HUD._format_time`
+      only ever displays whole seconds anyway). Verified directly: a
+      client's `match_time_remaining` tracked the server's within about a
+      second at two separate checkpoints 3 seconds apart.
+    - **Real root cause of the freeze + missing kill message (first attempt
+      was wrong)**: initially attributed this to the same NodePath-reuse
+      bug already fixed for `Character` nodes (see the restart-corruption
+      entry above) and gave every `Explosion` a unique name too. That
+      didn't fix it — the user's very next `client.log` showed the exact
+      same `on_despawn_receive ... recv_nodes doesn't have net_id` errors
+      again. The *actual* root cause: `Explosion.tscn`'s entire lifetime is
+      only **0.2 seconds** (`LifetimeTimer.wait_time`), which is simply too
+      short to reliably survive a real `MultiplayerSpawner` spawn+despawn
+      round-trip over any actual network latency — the despawn notification
+      can easily arrive at a client before it's even finished registering
+      the spawn, regardless of naming. This never showed up in this
+      session's own localhost headless testing (near-zero latency never
+      exposes the race) but is a real risk over any real connection,
+      especially since chain-explosion kills (an intentional mechanic — a
+      kill's explosion can itself kill nearby characters, cascading)
+      routinely spawn several in quick succession. The resulting cache
+      corruption was severe enough to explain both symptoms: the client's
+      whole view appearing frozen, and the `_sync_character_died` broadcast
+      (added earlier this session) silently failing to arrive, so no
+      "Killed by X" message ever showed.
+      Properly fixed by not networking the `Explosion` node via
+      `MultiplayerSpawner` at all: `GameManager.spawn_explosion()` now
+      instantiates a purely local copy on the server
+      (`_spawn_local_explosion()`, plain `add_child`, no spawner involved)
+      and separately broadcasts a `_replay_explosion`
+      `@rpc("authority", "unreliable")` carrying just the data (position,
+      head-scale ratio, killer/victim ids) so every other peer builds its
+      own independent, also purely local copy. Since `HealthComponent.take_damage()`
+      has no authority check of its own, `ExplosionArea._detonate()`'s
+      actual damage-dealing loop is now gated to `multiplayer.is_server()`
+      — every peer plays the same visual/audio, but only the server's copy
+      ever affects real gameplay. Removed the now-dead `MultiplayerSpawner`
+      under `Main.tscn`'s `FXRoot` (Explosion was its only spawnable scene).
+      Verified with a more realistic retest than the first attempt: let
+      real bot combat run for several seconds (3 natural deaths) *while*
+      also firing a synthetic burst of 10 more explosions back-to-back — a
+      connected client received all 13 `character_died` broadcasts with
+      **zero** replication errors, versus the user's real, reproducible
+      errors before this fix.
+    - **A fourth, genuinely separate bug remained after the above**: user
+      retest showed the console errors were gone, but the client still
+      never saw the "Killed by X"/"You died" overlay or respawn countdown.
+      Root cause: `Character.player_id` was never in `Character.tscn`'s
+      `SceneReplicationConfig` at all (only `owning_peer_id` was) — so on
+      every client, every character's `player_id` was permanently stuck at
+      its unset default (`-1`). `HUD._on_character_died()` decides whether
+      to show the death overlay via `victim_player_id ==
+      _local_character.player_id`, which could therefore never match on a
+      client, even though `character_died` itself was now arriving
+      correctly (the kill feed, which doesn't depend on `player_id`,
+      already worked). Fixed by adding `player_id` to the replication
+      config (`spawn=true`, on-change, same pattern as `owning_peer_id`).
+      Verified directly: a client's `HUD._local_character.player_id`
+      correctly resolved to the real value (was always `-1` before), and
+      killing that character from the host produced
+      `death_overlay.visible=true` with the text "Killed by Player /
+      Respawning in 1..." on the client — the exact behavior that was
+      missing.
 
 ## Backlog / possible next steps
 

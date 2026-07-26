@@ -43,6 +43,17 @@ func _ready() -> void:
 ## from this explosion instance. Chain reactions (a victim's own death
 ## spawning its own Explosion) are handled naturally by that victim's own
 ## HealthComponent/Character, not by this node recursing.
+##
+## Runs identically on every peer now (see GameManager.spawn_explosion —
+## this node is no longer MultiplayerSpawner-replicated at all, each peer
+## gets its own independently-spawned local instance), but the actual
+## damage-dealing is gated to the server: HealthComponent.take_damage() has
+## no authority check of its own, so every peer's local copy would
+## otherwise apply damage to its own (about-to-be-overwritten-by-sync)
+## copy of nearby characters' health — harmless in the end since the
+## server's real value wins on the next sync, but a needless correctness
+## risk (e.g. a client incorrectly seeing die() fire locally) for zero
+## benefit, since only the server's result actually matters.
 func _detonate() -> void:
 	if _detonated:
 		return
@@ -57,17 +68,18 @@ func _detonate() -> void:
 	# Bigger head = bigger explosion = louder bang, not just a wider radius.
 	Audio.play_random_sfx_3d(EXPLOSION_SOUNDS, global_transform.origin, lerp(0.0, 8.0, head_scale_ratio))
 
-	for body in area.get_overlapping_bodies():
-		if body is Character and body.health.is_alive:
-			var offset: Vector3 = body.global_transform.origin - global_transform.origin
-			var dist: float = offset.length()
-			var falloff: float = clamp(1.0 - dist / radius, 0.0, 1.0)
-			if falloff <= 0.0:
-				continue
-			body.health.take_damage(damage * falloff, killer_player_id)
-			if body.health.is_alive:
-				var direction: Vector3 = offset.normalized() if dist > 0.001 else Vector3.UP
-				body.apply_external_impulse(direction * force * falloff)
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		for body in area.get_overlapping_bodies():
+			if body is Character and body.health.is_alive:
+				var offset: Vector3 = body.global_transform.origin - global_transform.origin
+				var dist: float = offset.length()
+				var falloff: float = clamp(1.0 - dist / radius, 0.0, 1.0)
+				if falloff <= 0.0:
+					continue
+				body.health.take_damage(damage * falloff, killer_player_id)
+				if body.health.is_alive:
+					var direction: Vector3 = offset.normalized() if dist > 0.001 else Vector3.UP
+					body.apply_external_impulse(direction * force * falloff)
 
 	lifetime_timer.start()
 
