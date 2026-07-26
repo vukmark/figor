@@ -29,7 +29,7 @@ func _resolve_shot() -> void:
 		var hit_point := to
 		if not result.is_empty():
 			hit_point = result.position
-		_spawn_tracer(global_transform.origin, hit_point)
+		_record_tracer(global_transform.origin, hit_point)
 
 		if not result.is_empty():
 			any_hit = true

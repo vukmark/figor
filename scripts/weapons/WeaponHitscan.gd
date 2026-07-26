@@ -21,7 +21,7 @@ func _resolve_shot() -> void:
 		hit_point = result.position
 
 	_spawn_muzzle_flash()
-	_spawn_tracer(global_transform.origin, hit_point)
+	_record_tracer(global_transform.origin, hit_point)
 
 	if result.is_empty():
 		fired.emit(to, false)

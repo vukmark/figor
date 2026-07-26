@@ -26,6 +26,23 @@ var _spawn_index := 0
 var _next_player_id := 1
 var _bot_number := 0
 
+## Never reset (unlike _next_player_id/_bot_number, which intentionally
+## restart each match for scoring/display purposes) — guarantees every
+## spawned Character gets a node name it never had before, for the whole
+## process lifetime. Godot's default auto-uniquified sibling names
+## ("Character", "Character2", ...) reset back to the same sequence every
+## time characters_root is emptied, so a restart would immediately reuse
+## the exact names the just-despawned characters had — reproduced as a
+## real NodePath identity collision in the multiplayer replication cache
+## on a connected client (manifests as "Node not found: .../
+## MultiplayerSynchronizer" errors, and in one repro an engine crash).
+var _spawn_sequence := 0
+
+## Real ENet peer_id -> Character, server-only (bots never enter this map,
+## they pass peer_id 0). Used to despawn a departed player's character on
+## disconnect.
+var _peer_characters: Dictionary = {}
+
 
 func register_world(world: Node3D, characters_container: Node3D, fx_container: Node3D, points: Array[Node3D], platforms: Array[Vector3] = []) -> void:
 	world_root = world
@@ -46,6 +63,7 @@ func reset_match() -> void:
 	_spawn_index = 0
 	_next_player_id = 1
 	_bot_number = 0
+	_peer_characters.clear()
 
 
 func _process(delta: float) -> void:
@@ -95,13 +113,19 @@ func get_next_spawn_point(excluding_player_id: int = -1) -> Node3D:
 
 
 ## Server-authoritative: only ever called on the host/server. `display_name`
-## is auto-generated ("Player" / "Bot N") when left blank.
-func spawn_character(input_provider_scene: PackedScene, display_name: String = "") -> Node:
+## is auto-generated ("Player" / "Bot N") when left blank. `peer_id` is the
+## real ENet peer this character belongs to (0 for bots — never a valid
+## ENet peer id, so it's a safe "no owner" sentinel distinct from the -1
+## already used elsewhere for "no killer").
+func spawn_character(input_provider_scene: PackedScene, display_name: String = "", peer_id: int = 0) -> Node:
 	if character_scene == null or characters_root == null:
 		push_warning("GameManager: character_scene or characters_root not set")
 		return null
 	var character := character_scene.instantiate()
+	_spawn_sequence += 1
+	character.name = "Character_%d" % _spawn_sequence
 	character.set_multiplayer_authority(1)
+	character.owning_peer_id = peer_id
 
 	# Swap the input provider BEFORE the character enters the tree, so its
 	# _ready() never sees the scene's default PlayerInputProvider. Otherwise
@@ -127,13 +151,27 @@ func spawn_character(input_provider_scene: PackedScene, display_name: String = "
 	character.display_name = display_name
 	scores[character.player_id] = {"name": display_name, "kills": 0, "deaths": 0}
 	_next_player_id += 1
-	scores_changed.emit()
+	_broadcast_scores()
 
 	characters_root.add_child(character, true)
+	if peer_id > 0:
+		_peer_characters[peer_id] = character
 	var spawn_point := get_next_spawn_point()
 	if spawn_point:
 		character.global_transform = spawn_point.global_transform
 	return character
+
+
+## Server-only. Called on NetworkManager.player_disconnected. Frees that
+## peer's Character; MultiplayerSpawner replicates the despawn to every
+## other peer once the node exits the tree on the authority.
+func despawn_peer(peer_id: int) -> void:
+	if not _peer_characters.has(peer_id):
+		return
+	var character: Node = _peer_characters[peer_id]
+	_peer_characters.erase(peer_id)
+	if is_instance_valid(character):
+		character.queue_free()
 
 
 ## Server-only: decides an explosion happened, spawns the one-shot effect,
@@ -152,6 +190,7 @@ func spawn_explosion(pos: Vector3, head_scale_ratio: float, killer_player_id: in
 
 	_record_kill(killer_player_id, victim_player_id)
 	character_died.emit(victim_player_id, killer_player_id)
+	_sync_character_died.rpc(victim_player_id, killer_player_id)
 
 
 func _record_kill(killer_player_id: int, victim_player_id: int) -> void:
@@ -163,7 +202,7 @@ func _record_kill(killer_player_id: int, victim_player_id: int) -> void:
 		scores[killer_player_id]["kills"] += 1
 		if scores[killer_player_id]["kills"] >= Constants.MATCH_KILL_LIMIT:
 			_end_match(killer_player_id, "kill limit reached")
-	scores_changed.emit()
+	_broadcast_scores()
 
 
 func _leading_player_id() -> int:
@@ -179,5 +218,38 @@ func _leading_player_id() -> int:
 func _end_match(winner_player_id: int, reason: String) -> void:
 	if match_over:
 		return
+	match_over = true
+	match_ended.emit(winner_player_id, reason)
+	_sync_match_ended.rpc(winner_player_id, reason)
+
+
+## `scores` is a plain per-instance autoload dict — HUD.gd reads
+## GameManager.scores directly (scoreboard/kill-feed/game-over text), so
+## without this a client's own HUD would show nothing. Only the server
+## calls this (every scores mutation happens server-side already); clients
+## receive it and update their own local copy.
+func _broadcast_scores() -> void:
+	scores_changed.emit()
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		_sync_scores.rpc(scores)
+
+
+@rpc("authority", "reliable")
+func _sync_scores(new_scores: Dictionary) -> void:
+	scores = new_scores
+	scores_changed.emit()
+
+
+## character_died/match_ended are only ever emitted from server-only code
+## paths (spawn_explosion/_end_match both early-return on clients) — without
+## rebroadcasting them, a client's HUD would never show the "Killed by X" /
+## "You died" overlay, kill feed, or game-over screen at all.
+@rpc("authority", "reliable")
+func _sync_character_died(victim_player_id: int, killer_player_id: int) -> void:
+	character_died.emit(victim_player_id, killer_player_id)
+
+
+@rpc("authority", "reliable")
+func _sync_match_ended(winner_player_id: int, reason: String) -> void:
 	match_over = true
 	match_ended.emit(winner_player_id, reason)

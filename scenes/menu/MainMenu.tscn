@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/menu/MainMenu.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/menu/SettingsPanel.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/menu/JoinPanel.tscn" id="3"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -38,9 +39,13 @@ horizontal_alignment = 1
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
 
-[node name="StartButton" type="Button" parent="VBoxContainer"]
+[node name="HostButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
-text = "Start Match"
+text = "Host Game"
+
+[node name="JoinButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Join Game"
 
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
@@ -51,4 +56,7 @@ layout_mode = 2
 text = "Quit"
 
 [node name="SettingsPanel" parent="." instance=ExtResource("2")]
+visible = false
+
+[node name="JoinPanel" parent="." instance=ExtResource("3")]
 visible = false

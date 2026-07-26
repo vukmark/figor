@@ -27,6 +27,13 @@ var _active_weapon_index := 0
 var player_id: int = -1
 var display_name: String = ""
 
+## The real ENet peer id of whoever this character belongs to (0 for bots,
+## -1 until the server assigns it). Synced via spawn=true so it's already
+## correct by _ready() on every peer, including late joiners. Each peer
+## compares this to multiplayer.get_unique_id() to know whether a given
+## spawned Character is "theirs" (camera, input routing).
+var owning_peer_id: int = -1
+
 const FOOTSTEP_DISTANCE_INTERVAL := 2.2
 const FOOTSTEP_SOUNDS: Array[AudioStream] = [
 	preload("res://assets/kenney/audio/impact/Audio/footstep_concrete_000.ogg"),
@@ -85,7 +92,29 @@ func set_input_provider(provider: InputProvider) -> void:
 
 func _bind_input_provider(provider: Node) -> void:
 	input_provider = provider
+	if provider is PlayerInputProvider:
+		provider.owning_peer_id = owning_peer_id
+		provider.is_locally_controlled = owning_peer_id == multiplayer.get_unique_id()
+		provider.character = self
 	_update_camera_active()
+
+
+## Camera pitch (unlike yaw, which rotates the CharacterBody3D itself and
+## rides along with the already-synced `.:transform`) lives on a child node
+## never included in replication — normally applied by the authority in
+## _physics_process below, which never runs at all on a real client (only
+## the authority/host ever passes is_multiplayer_authority()). Without this,
+## a remote client's own camera pitch would never move. Called directly by
+## PlayerInputProvider for a genuine remote client only (see the
+## multiplayer.is_server() guard there) — the host applies the identical
+## clamp itself, just via the authoritative path below, so calling this too
+## for the host would double-apply the same delta.
+func apply_local_look_pitch(delta_pitch: float) -> void:
+	camera.rotation.x = clamp(
+		camera.rotation.x + delta_pitch,
+		deg_to_rad(Constants.CAMERA_PITCH_MIN),
+		deg_to_rad(Constants.CAMERA_PITCH_MAX)
+	)
 
 
 func _update_camera_active() -> void:

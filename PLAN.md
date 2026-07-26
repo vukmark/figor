@@ -364,6 +364,171 @@ commitment, just a suggested order).
 damage indicator, player customization/skins, accessibility options,
 additional game modes (currently implicit free-for-all).
 
+- **Stage 3 — basic networked multiplayer (no client prediction)**:
+  real ENet host/join now works, not just the local-host-only wiring from
+  Stage 1. `NetworkManager.host_game()`/`join_game()` (already-functional
+  code, just never exercised with a second real peer) are now wired to new
+  `MainMenu` Host/Join buttons — Join opens a small `JoinPanel`
+  (IP + port, mirrors `SettingsPanel`'s show/hide pattern) — and are called
+  *before* `change_scene_to_file` so `Main._ready()` can just branch on
+  `NetworkManager.is_server()`.
+  Movement stays server-authoritative (`Character` keeps
+  `multiplayer_authority = 1`, the host, matching the pre-existing
+  `_physics_process` authority gate) — the actual gap closed here is that
+  **zero `@rpc` methods existed anywhere** before this, so a remote
+  client's input had no way to reach the server. New
+  `Character.owning_peer_id` (synced via `spawn=true`, same pattern as
+  `head_scale`/`current_health`) lets every peer determine which spawned
+  Character is "theirs" (camera activation, input routing). A remote
+  client's `PlayerInputProvider` now polls local input and ships it via
+  `submit_input_command.rpc_id(1, ...)` (`@rpc("any_peer",
+  "unreliable_ordered")`) every physics tick; the server-side receiver
+  validates `get_remote_sender_id() == owning_peer_id` (rejects spoofed
+  input for a character the sender doesn't own) and stores it for
+  `get_input_command()` to return instead of polling local `Input.*`.
+  `GameManager.spawn_character()` takes a real `peer_id` now, tracks a
+  `peer_id -> Character` map, and `despawn_peer()` cleans up on
+  disconnect; `Main.gd` wires `NetworkManager.player_connected/disconnected`
+  to spawn/despawn real peers, so late-join mid-match works automatically.
+  `restart_match()` is now a no-op for non-server peers (a client
+  triggering it would have locally rebuilt spawner-owned state it doesn't
+  own — a real latent bug once a second real peer exists, not just a
+  theoretical one).
+  **Real gap found and fixed along the way, not in the original plan**:
+  `GameManager.scores` is a plain per-instance autoload dict and
+  `character_died`/`match_ended` are only ever emitted from server-only
+  code paths (`spawn_explosion()`/`_end_match()` both early-return on
+  clients) — without syncing, a client's HUD would show a permanently
+  blank scoreboard/kill-feed and would never show the "Killed by X"/"You
+  died" overlay or the game-over screen at all. Fixed with three small
+  `@rpc("authority", "reliable")` broadcasts
+  (`_sync_scores`/`_sync_character_died`/`_sync_match_ended`) fired
+  alongside the existing local signal emits.
+  Verified via a headless two-process ENet smoke test (host + a real
+  joining peer, no GUI/display available in this environment): peer
+  connect → correct `owning_peer_id` assignment → correct per-peer
+  `is_locally_controlled`/camera-current resolution on *both* sides →
+  scores dict fully replicated to the client, including the joining
+  player's own entry. **Not yet verified**: actual movement feel/input
+  latency, aiming/firing across a real network, or the visual HUD overlays
+  — those need a real two-window playtest (two Godot instances on
+  localhost, or two machines on a LAN) since headless mode has no
+  display/input.
+  Known limitations (by design, this pass): no client-side
+  prediction/reconciliation (remote movement will feel laggy, proportional
+  to RTT — planned as a separate future pass); no lag compensation for
+  hitscan; `jump_pressed`/`switch_weapon_pressed` can be silently dropped
+  on packet loss (sent over `unreliable_ordered`, movement/fire self-heal
+  on the next packet, these two don't); no reconnect/rejoin state
+  carry-over; disconnected players' scoreboard entries linger;
+  listen-server only, no dedicated-server mode; `GameManager.match_time_remaining`
+  is not synced, so a client's HUD timer will show a static, non-ticking
+  value (cosmetic — the server's own timer is what actually ends the
+  match).
+
+- **Stage 3 real-usage bug hunt (post-implementation)**: the user's first
+  real two-instance playtest (not headless) surfaced two symptoms — client
+  falling/clipping through terrain, and mouse not controlling the client's
+  look. Root-caused via a headless two-process repro harness (not kept in
+  the repo):
+  - **Confirmed and fixed**: `Arena.gd` generated its terrain/obstacle
+    layout from Godot's global, unseeded RNG (`randi()`/`randf_range()`/
+    `randi_range()`, plus `randomize()`) in its own `_ready()` — since
+    `Arena` is a plain static child of `Main.tscn` (not spawned via
+    `MultiplayerSpawner`), **every peer independently generated a
+    completely different random arena**. Character positions were
+    correctly synced from the server, but rendered against each client's
+    own, different terrain/walls — this is what "gassing through terrain"
+    actually was. Fixed by converting `Arena.gd` to a local seeded
+    `RandomNumberGenerator` (`_rng`), extracting generation into a public
+    `generate_arena(seed_value)` (replaces the old automatic `_ready()`
+    generation), and having the server roll one seed per match/restart and
+    hand it to clients via new `Main.gd` RPCs (`request_arena_seed`,
+    pulled by the client once its own `connected_to_server` signal fires —
+    not pushed by the server, which would race the client's own scene-load
+    timing; `_apply_arena_seed`, sent back by the server). Verified via the
+    repro harness: host and client end up with byte-identical
+    `arena_seed`, obstacle count, and platform-point coordinates.
+  - **Confirmed and fixed, a second real bug found via the same repro**:
+    restarting the match while a real peer was connected reproducibly
+    triggered `ERROR: Node not found: .../MultiplayerSynchronizer` on the
+    client (matching the user's actual host.log) and, in one repro run, an
+    **engine-level crash (SIGSEGV)**. Root cause: `restart_match()`
+    despawned every `Character` via immediate `.free()` — deleting a
+    `MultiplayerSpawner`-tracked node's replication bookkeeping
+    synchronously, before the despawn notification finished flushing to
+    the connected client — fixed by switching to `queue_free()`. Also
+    fixed: new post-restart characters immediately reused the exact same
+    Godot auto-uniquified node names (`Character`, `Character2`, ...) the
+    just-despawned ones had, which alone was enough to leave the client
+    with a **stale/incorrect character roster** even after the
+    `queue_free()` fix — fixed by giving every spawned `Character` a
+    permanently unique name (`GameManager._spawn_sequence`, never reset by
+    `reset_match()`, unlike the per-match `_next_player_id`/`_bot_number`
+    counters).
+  - **Not fully resolved — real limitation, not covered up**: even after
+    both fixes above, restarting mid-session with a real peer connected
+    still leaves that peer's `MultiplayerSpawner` replication unable to
+    receive the *newly spawned* post-restart characters (repro showed the
+    client stuck with a stale roster, though no longer crashing). Root
+    cause not fully isolated — plausibly an engine-level limitation in how
+    `MultiplayerSpawner` handles a mass despawn+respawn burst against an
+    already-connected peer, though not confirmed. Rather than keep
+    patching blindly, `Main.restart_match()` now hard-blocks (with a
+    `push_warning`) whenever `multiplayer.get_peers()` is non-empty, so a
+    restart can no longer silently corrupt a live multiplayer session —
+    restarting is only available again once everyone else has
+    disconnected. **This needs real investigation** (ideally with actual
+    Godot editor debugging/logging, not just headless repro) before
+    restart-while-connected can be safely re-enabled.
+  - Terrain fix confirmed by user retest ("terrain is good now"). Follow-up
+    retest surfaced two more real, isolated bugs (not the restart-corruption
+    guessed above — that theory didn't pan out; these are separate,
+    unrelated root causes):
+    - **Camera pitch never worked for a client, only yaw did**: yaw is
+      applied via `rotate_y()` directly on the `CharacterBody3D`, which
+      rides along with the already-synced `.:transform` — but pitch is
+      `camera.rotation.x` on a *child* node (`CameraRig/Camera3D`) that was
+      never part of `SceneReplicationConfig`, and was only ever being set
+      inside `Character._physics_process()`, which — like everything else
+      gated on `is_multiplayer_authority()` — never runs at all on a real
+      client (authority is always the host). Fixed by having a genuine
+      remote client apply its own pitch delta immediately/locally
+      (`Character.apply_local_look_pitch()`, called from
+      `PlayerInputProvider._input()` only when `not multiplayer.is_server()`,
+      to avoid double-applying the same delta on the host, which still
+      updates pitch via the pre-existing authoritative path). This is
+      intentionally *not* networked — nobody but the owning peer ever
+      needs to see their own camera's pitch, so an immediate local update
+      is both simpler and more responsive than round-tripping it.
+    - **Client couldn't fire — because nobody but the server ever saw/heard
+      any shot, from anyone**: `try_fire()`/`_resolve_shot()` (both weapon
+      types) call `Audio.play_sfx_3d`/`_spawn_muzzle_flash`/`_spawn_tracer`
+      directly — all of which just `add_child` onto *the calling peer's own*
+      `get_tree().current_scene`, with zero networking involved. Since
+      firing is server-authoritative (`try_fire()` is only ever invoked from
+      `Character._physics_process()`, itself authority-gated), 100% of fire
+      sound, muzzle flash, tracers, and hit sound only ever appeared on the
+      **server's** screen — a client firing (or watching anyone else fire)
+      got no feedback at all, even though the shot was actually resolving
+      correctly server-side (damage already replicated fine via
+      `HealthComponent`, just invisibly/silently). Fixed by having
+      `WeaponBase.try_fire()` collect what it just did (tracer endpoints,
+      hit positions) and broadcast a single `_replay_fire_feedback` RPC
+      (`@rpc("authority", "unreliable")`) so every other peer replays the
+      same muzzle flash/tracer(s)/fire sound/hit sound/hit-marker locally.
+      Ammo/reload state itself is *not* synced (each peer's own copy of a
+      weapon independently, harmlessly ticks its own unused ammo/cooldown
+      numbers, since only the server's copy is ever actually consulted by
+      `try_fire()`) — a client's own ammo/reload HUD counter can therefore
+      still show stale/wrong numbers even though firing itself now works
+      correctly; flagged as a known follow-up, not fixed this pass (see
+      backlog).
+    Both fixes verified via the headless repro harness (RPC/replication
+    plumbing only — no real display/mouse/audio available headless, so the
+    *actual feel* of pitch and fire feedback still needs a real two-window
+    retest).
+
 ## Backlog / possible next steps
 
 Nothing here is committed to — just candidates to pick from next session.
@@ -371,7 +536,12 @@ Nothing here is committed to — just candidates to pick from next session.
 - [x] Noise-based terrain (rolling hills) — done, see "Done so far" above.
 - [x] Stage 2: local multiplayer — skipped by decision (split-screen is rare
 	  on PC), see Stages section above.
-- [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
+- [x] Stage 3: real networked multiplayer, basic pass (host/join UI, real
+	  ENet peers, server-authoritative movement via input RPCs) — done, see
+	  "Done so far" above. Client-side prediction is explicitly deferred as
+	  a separate future pass (see limitations above); needs a real
+	  two-window playtest to verify feel/latency (only headless-verified
+	  so far).
 - [x] Headshot damage multiplier — done, see "Done so far" above.
 - [x] More weapon variety — done, see "Done so far" above.
 - [ ] Visual stairs — tried and reverted, see "Done so far" above (the
@@ -381,3 +551,11 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] In-game key-rebinding UI (input map already supports it)
 - [ ] Tier 3 polish: minimap/radar, directional damage indicator, player
 	  skins, accessibility options, additional game modes
+- [ ] Investigate why `restart_match()` breaks `MultiplayerSpawner`
+	  replication for an already-connected client (currently hard-blocked
+	  server-side instead of fixed — see the Stage 3 bug-hunt entry above).
+- [ ] Sync ammo/reload state to the owning client (currently each peer's
+	  own copy of a weapon ticks its own unused, unsynced ammo/cooldown —
+	  firing itself works correctly, but a client's own ammo/reload HUD
+	  counter can show stale/wrong numbers — see the Stage 3 bug-hunt entry
+	  above).

@@ -45,34 +45,54 @@ var _placed: Array[Dictionary] = []
 var _platform_points: Array[Vector3] = []
 
 var _terrain: ArenaTerrain
+var _rng := RandomNumberGenerator.new()
 
 
-func _ready() -> void:
-	if not Engine.is_editor_hint():
-		randomize()
+## Every peer must produce byte-for-byte the same arena from the same
+## seed_value — the server generates a fresh seed once per match/restart and
+## sends it to every client (see Main.gd's request_arena_seed/_apply_arena_seed
+## RPCs), instead of each peer independently randomizing its own layout.
+## Without this, a client's local terrain/obstacles wouldn't match the
+## server's authoritative collision, since only the server ever actually
+## runs physics — the mismatch shows up as characters appearing to clip
+## through terrain or walk through walls that aren't really there.
+## Safe to call more than once on the same instance (defensively clears any
+## previously generated geometry first) since a client reuses one Arena
+## node across a match restart rather than getting a fresh instance like
+## the server does.
+func generate_arena(seed_value: int) -> void:
+	_rng.seed = seed_value
+	for child in obstacles_root.get_children():
+		obstacles_root.remove_child(child)
+		child.free()
+	for child in terrain_root.get_children():
+		terrain_root.remove_child(child)
+		child.free()
+	_placed.clear()
+	_platform_points.clear()
 
-		_terrain = ArenaTerrain.new()
-		var spawn_positions: Array = []
-		for sp in get_spawn_points():
-			spawn_positions.append(sp.global_transform.origin)
-		_terrain.generate(randi(), spawn_positions)
+	_terrain = ArenaTerrain.new()
+	var spawn_positions: Array = []
+	for sp in get_spawn_points():
+		spawn_positions.append(sp.global_transform.origin)
+	_terrain.generate(seed_value, spawn_positions)
 
-		# Clamp raw noise slope BEFORE obstacles sample/flatten the heightmap —
-		# obstacles read get_height() to place themselves, and the mesh+
-		# collision are built from these same final heights, so placement and
-		# the built terrain must agree. Clamping afterward instead (as a
-		# platform's own flatten_patch call runs mid-placement) would let the
-		# heightmap shift again after an obstacle already read its Y from it,
-		# leaving that obstacle floating/sunken relative to the real terrain.
-		_terrain.clamp_slopes()
-		# Obstacles sample/flatten the heightmap as they place themselves —
-		# the mesh+collision are only built afterward, from the final
-		# (obstacle-flattened) heights, so platforms sit flush instead of
-		# clipping into or floating above sloped ground.
-		_generate_obstacles()
-		_build_terrain_body()
+	# Clamp raw noise slope BEFORE obstacles sample/flatten the heightmap —
+	# obstacles read get_height() to place themselves, and the mesh+
+	# collision are built from these same final heights, so placement and
+	# the built terrain must agree. Clamping afterward instead (as a
+	# platform's own flatten_patch call runs mid-placement) would let the
+	# heightmap shift again after an obstacle already read its Y from it,
+	# leaving that obstacle floating/sunken relative to the real terrain.
+	_terrain.clamp_slopes()
+	# Obstacles sample/flatten the heightmap as they place themselves —
+	# the mesh+collision are only built afterward, from the final
+	# (obstacle-flattened) heights, so platforms sit flush instead of
+	# clipping into or floating above sloped ground.
+	_generate_obstacles()
+	_build_terrain_body()
 
-		nav_region.bake_navigation_mesh(false)
+	nav_region.bake_navigation_mesh(false)
 
 
 func _build_terrain_body() -> void:
@@ -104,19 +124,19 @@ func _get_terrain_height(x: float, z: float) -> float:
 func _generate_obstacles() -> void:
 	# Platforms placed first so they get first pick of open ground — walls
 	# and crates fill in around whatever space is left.
-	var platform_count := randi_range(PLATFORM_COUNT_MIN, PLATFORM_COUNT_MAX)
+	var platform_count := _rng.randi_range(PLATFORM_COUNT_MIN, PLATFORM_COUNT_MAX)
 	for i in range(platform_count):
 		_place_platform()
 
-	var wall_count := randi_range(10, 16)
+	var wall_count := _rng.randi_range(10, 16)
 	for i in range(wall_count):
 		_place_wall_segment()
 
-	var crate_count := randi_range(8, 14)
+	var crate_count := _rng.randi_range(8, 14)
 	for i in range(crate_count):
 		_place_box_obstacle(CRATE_SCENE, CRATE_SIZE, CRATE_HEIGHT_OFFSET)
 
-	var column_count := randi_range(4, 7)
+	var column_count := _rng.randi_range(4, 7)
 	for i in range(column_count):
 		_place_box_obstacle(COLUMN_SCENE, COLUMN_SIZE, COLUMN_HEIGHT_OFFSET)
 
@@ -126,8 +146,8 @@ func _generate_obstacles() -> void:
 ## CharacterBody3D's move_and_slide handles a smooth slope reliably, whereas
 ## individual stair-step colliders risk snagging player/bot movement.
 func _place_platform() -> void:
-	var plat_w := randf_range(PLATFORM_SIZE_MIN, PLATFORM_SIZE_MAX)
-	var plat_d := randf_range(PLATFORM_SIZE_MIN, PLATFORM_SIZE_MAX)
+	var plat_w := _rng.randf_range(PLATFORM_SIZE_MIN, PLATFORM_SIZE_MAX)
+	var plat_d := _rng.randf_range(PLATFORM_SIZE_MIN, PLATFORM_SIZE_MAX)
 
 	# Reserve a generously padded square covering the platform plus the ramp
 	# in any of the 4 directions it might end up facing — simpler and safer
@@ -163,7 +183,7 @@ func _place_platform() -> void:
 	mesh_instance.material_override = mat
 	platform_body.add_child(mesh_instance)
 
-	var side: Vector3 = SIDE_DIRECTIONS[randi() % SIDE_DIRECTIONS.size()]
+	var side: Vector3 = SIDE_DIRECTIONS[_rng.randi() % SIDE_DIRECTIONS.size()]
 	var half_dim := plat_d * 0.5 if side.z != 0.0 else plat_w * 0.5
 	var top_point := Vector3(pos.x, ground_y + PLATFORM_HEIGHT, pos.z) + side * half_dim
 	# The bottom end samples terrain height independently at its own (x,z) —
@@ -222,8 +242,8 @@ func _basis_looking(direction: Vector3) -> Basis:
 ## (not a Kenney tile) since these need arbitrary lengths without visibly
 ## stretching a small modular texture.
 func _place_wall_segment() -> void:
-	var length := randf_range(WALL_LENGTH_MIN, WALL_LENGTH_MAX)
-	var rotated_90 := randi() % 2 == 0
+	var length := _rng.randf_range(WALL_LENGTH_MIN, WALL_LENGTH_MAX)
+	var rotated_90 := _rng.randi() % 2 == 0
 	var footprint := Vector3(WALL_THICKNESS, 0, length) if not rotated_90 else Vector3(length, 0, WALL_THICKNESS)
 
 	var pos := _find_valid_position(footprint)
@@ -278,8 +298,8 @@ func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_off
 func _find_valid_position(footprint: Vector3) -> Vector3:
 	for attempt in range(MAX_PLACEMENT_ATTEMPTS):
 		var candidate := Vector3(
-			randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT), 0,
-			randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT)
+			_rng.randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT), 0,
+			_rng.randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT)
 		)
 		if _clears_spawns(candidate, footprint) and _clears_obstacles(candidate, footprint):
 			return candidate

@@ -44,6 +44,13 @@ var _cooldown_remaining := 0.0
 var _reload_time_remaining := 0.0
 var _character: Character
 
+## Collected during _resolve_shot() (both weapon types call _record_tracer/
+## _record_hit instead of the raw local-only helpers) and flushed to every
+## other peer in a single broadcast right after — see try_fire().
+var _pending_tracer_from: PackedVector3Array = []
+var _pending_tracer_to: PackedVector3Array = []
+var _pending_hit_positions: PackedVector3Array = []
+
 
 func _ready() -> void:
 	_character = _find_character(self)
@@ -78,7 +85,20 @@ func try_fire() -> void:
 	ammo_changed.emit(current_ammo, magazine_size)
 
 	Audio.play_sfx_3d(fire_sound, global_transform.origin)
+	_pending_tracer_from.clear()
+	_pending_tracer_to.clear()
+	_pending_hit_positions.clear()
 	_resolve_shot()
+
+	# _resolve_shot() (and the sound/muzzle-flash calls around it) only ever
+	# run on whichever peer calls try_fire() — always the server, since
+	# firing is server-authoritative. Without this broadcast, nobody would
+	# ever see or hear a shot except the server: every muzzle flash/tracer/
+	# fire sound/hit sound just spawned above only exists on the server's
+	# own local scene tree. This is what made firing look completely dead
+	# from a client's perspective, even though the shot was actually
+	# landing (damage already replicates fine via HealthComponent).
+	_replay_fire_feedback.rpc(_pending_tracer_from, _pending_tracer_to, _pending_hit_positions)
 
 
 ## Casts whatever ray(s) this weapon type fires and applies damage/FX for
@@ -100,6 +120,32 @@ func _apply_hit(collider: Character, shape_index: int, hit_position: Vector3, pe
 	collider.health.take_damage(dealt_damage, _character.player_id)
 	hit_character.emit()
 	Audio.play_random_sfx_3d(hit_sounds, hit_position)
+	_pending_hit_positions.append(hit_position)
+
+
+## Weapon subclasses call this instead of _spawn_tracer() directly during
+## _resolve_shot(), so every tracer also gets queued into the fire-feedback
+## broadcast (see try_fire()) alongside the immediate local spawn.
+func _record_tracer(from: Vector3, to: Vector3) -> void:
+	_spawn_tracer(from, to)
+	_pending_tracer_from.append(from)
+	_pending_tracer_to.append(to)
+
+
+## Replays a shot's visible/audible feedback on every peer that didn't
+## actually run _resolve_shot() themselves (see try_fire()'s broadcast).
+@rpc("authority", "unreliable")
+func _replay_fire_feedback(tracer_from: PackedVector3Array, tracer_to: PackedVector3Array, hit_positions: PackedVector3Array) -> void:
+	Audio.play_sfx_3d(fire_sound, global_transform.origin)
+	_spawn_muzzle_flash()
+	for i in range(tracer_from.size()):
+		_spawn_tracer(tracer_from[i], tracer_to[i])
+	for pos in hit_positions:
+		Audio.play_random_sfx_3d(hit_sounds, pos)
+	var did_hit := not hit_positions.is_empty()
+	fired.emit(tracer_to[-1] if tracer_to.size() > 0 else global_transform.origin, did_hit)
+	if did_hit:
+		hit_character.emit()
 
 
 ## `result.shape` from intersect_ray is a shape index local to the collider's
