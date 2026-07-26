@@ -10,18 +10,26 @@ extends RefCounted
 const HALF_EXTENT := 50.0
 const CELL_SIZE := 1.0
 
-## First attempt used amplitude 2.5 with only a soft box-blur as the slope
-## safety net — technically real elevation, but visually almost
-## imperceptible (worst-case ~11°) at first-person eye height. Bumping
-## amplitude to fix that pushed worst-case *single-cell* slope as high as
-## ~40° on some seeds (a soft blur only reduces slopes on average, it
-## doesn't bound the worst case) — too close to CharacterBody3D's ~45°
-## floor_max_angle for comfort. Fixed properly below with clamp_slopes(),
-## an explicit iterative relaxation that mathematically guarantees no
-## adjacent grid cells ever exceed MAX_SLOPE_DEGREES, regardless of noise
-## amplitude — which is what actually lets amplitude go this high safely.
+## Amplitude 0 → flat ground (by request, now that structures/lighting/
+## materials carry the visual interest instead of terrain elevation). The
+## rest of the pipeline (noise generation, clamp_slopes, flatten_patch,
+## vertex coloring) is left fully intact and still runs — with amplitude 0
+## every height comes out exactly 0, so all of it is simply a no-op rather
+## than dead code, and bumping this back up later needs no other changes.
+## History: first non-zero attempt used amplitude 2.5 with only a soft
+## box-blur as the slope safety net — technically real elevation, but
+## visually almost imperceptible (worst-case ~11°) at first-person eye
+## height. Bumping amplitude to fix that pushed worst-case *single-cell*
+## slope as high as ~40° on some seeds (a soft blur only reduces slopes on
+## average, it doesn't bound the worst case) — too close to
+## CharacterBody3D's ~45° floor_max_angle for comfort. Fixed properly with
+## clamp_slopes() below, an explicit iterative relaxation that
+## mathematically guarantees no adjacent grid cells ever exceed
+## MAX_SLOPE_DEGREES regardless of amplitude — settled on 12.0 before this
+## change, kept here (in this comment) as the value to restore if rolling
+## hills come back.
 const NOISE_FREQUENCY := 0.025
-const NOISE_AMPLITUDE := 12.0
+const NOISE_AMPLITUDE := 0.0
 const FRACTAL_OCTAVES := 3
 const FRACTAL_GAIN := 0.4
 
@@ -38,6 +46,18 @@ const SLOPE_SMOOTH_PASSES := 1
 ## edge into "stuck."
 const MAX_SLOPE_DEGREES := 28.0
 const MAX_SLOPE_CLAMP_ITERATIONS := 25
+
+## Height-based vertex coloring, baked directly into the mesh rather than a
+## texture. A texture-based approach (e.g. triplanar) was considered first,
+## but standard triplanar's top-facing projection (the dominant one on this
+## mostly-flat/rolling terrain, since normals point mostly straight up)
+## samples using world X/Z, not height — a vertical gradient texture
+## wouldn't actually read as height-based color on the terrain's primary
+## visible surface. Vertex colors sidestep that entirely and need no UVs.
+## Arena.gd just sets `StandardMaterial3D.vertex_color_use_as_albedo = true`.
+const COLOR_LOW := Color(0.16, 0.14, 0.09)   # dark loam, low ground
+const COLOR_MID := Color(0.32, 0.42, 0.18)   # mossy green, mid elevation
+const COLOR_HIGH := Color(0.55, 0.53, 0.48)  # pale rock, peaks
 
 var width: int
 var depth: int
@@ -201,6 +221,21 @@ func get_height(x: float, z: float) -> float:
 	return lerp(h0, h1, fz)
 
 
+## Height fraction mapped through a 2-segment gradient (low->mid->high) —
+## deliberately simple (no slope term) since height alone already fixes the
+## "flat gray" look; slope-based blending is a possible follow-up, not
+## needed for this pass.
+func _height_color(h: float) -> Color:
+	# NOISE_AMPLITUDE == 0 (flat ground) would divide by zero below — every
+	# height is exactly 0 in that case anyway, so just use the mid color.
+	if NOISE_AMPLITUDE <= 0.001:
+		return COLOR_MID
+	var t: float = clamp((h + NOISE_AMPLITUDE) / (2.0 * NOISE_AMPLITUDE), 0.0, 1.0)
+	if t < 0.5:
+		return COLOR_LOW.lerp(COLOR_MID, t / 0.5)
+	return COLOR_MID.lerp(COLOR_HIGH, (t - 0.5) / 0.5)
+
+
 ## Built from the exact same height array as build_collision_shape() — the
 ## single source of truth, so visuals and collision can never mismatch.
 func build_mesh() -> ArrayMesh:
@@ -220,11 +255,21 @@ func build_mesh() -> ArrayMesh:
 			var p10 := Vector3(x1, h10, z0)
 			var p01 := Vector3(x0, h01, z1)
 			var p11 := Vector3(x1, h11, z1)
+			var c00 := _height_color(h00)
+			var c10 := _height_color(h10)
+			var c01 := _height_color(h01)
+			var c11 := _height_color(h11)
+			st.set_color(c00)
 			st.add_vertex(p00)
+			st.set_color(c10)
 			st.add_vertex(p10)
+			st.set_color(c01)
 			st.add_vertex(p01)
+			st.set_color(c10)
 			st.add_vertex(p10)
+			st.set_color(c11)
 			st.add_vertex(p11)
+			st.set_color(c01)
 			st.add_vertex(p01)
 	st.generate_normals()
 	return st.commit()

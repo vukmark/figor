@@ -341,13 +341,126 @@ regresses):
   which made "am I even hitting anything" impossible to tell — added
   tracer/muzzle flash/hit marker.
 
+- **Arena visuals rework — grid-based modular structures + lighting/materials**:
+  the arena worked correctly but looked poor (every wall/platform/ramp was a
+  flat-color primitive box scattered at random, terrain was one flat gray
+  color, lighting was untouched engine defaults). User explicitly chose the
+  larger of two options: replace random wall scatter with a grid-based
+  generator assembling proper modular building pieces, not just boxes.
+  - **New grid-based structures** (`Arena._place_structure()`,
+    `Arena._add_structure_piece()`): 3-5 small walled compounds per match,
+    assembled from the Kenney modular kit (`assets/kenney/environment/Models/`
+    `wall.glb`/`wall-corner.glb`/`wall-doorway.glb`/`floor-square.glb`) on
+    its native 1-unit grid (confirmed by parsing the glb files' own glTF
+    accessor bounds directly, not guessed) — real corners and a walkable
+    doorway gap, not scattered boxes. Each structure is one `StaticBody3D`
+    root scaled by `STRUCTURE_SCALE = 2.5` (native 1m walls are too short
+    for a 1.8m player) holding a compound collider (one `CollisionShape3D`
+    per non-doorway perimeter cell) plus mesh-instance children for every
+    cell including the doorway (visual only there — no collider, so
+    `bake_navigation_mesh()`'s existing `PARSED_GEOMETRY_STATIC_COLLIDERS`
+    parsing leaves a walkable gap for bots automatically). Reuses the
+    existing `_find_valid_position`/`_clears_spawns`/`_clears_obstacles`/
+    `_placed`/`flatten_patch` pipeline unchanged — rotation restricted to
+    90° steps so the world footprint stays axis-aligned. Every random
+    choice goes through the existing seeded `_rng`, never bare
+    `randi()/randf()` (verified via source grep) — this determinism is
+    what keeps host/client visually identical, the same class of bug
+    already hit and fixed once this session for terrain/obstacles.
+    **Known unverified detail, flagged honestly, not swept under the rug**:
+    `CORNER_YAW_DEGREES` (which way each corner piece rotates) is a
+    first-guess lookup table — a model's facing direction can't be
+    determined from mesh bounding-box data alone (which is all that was
+    available to check headlessly), so corners may need a one-time visual
+    flip in the editor. Everything else was verified: a headless
+    two-process ENet test confirmed byte-identical `_placed` data (a
+    content hash, not just the count) between host and a joining client;
+    a `NavigationServer3D.map_get_path()` probe confirmed every generated
+    structure's interior is actually reachable through its doorway
+    (path-length ratios of 1.1-1.8x straight-line distance, consistent
+    with normal terrain detours, not "routing around the whole building");
+    and a full fire-weapons-at-everyone smoke test with a real connected
+    client confirmed normal gameplay is unaffected.
+  - **Terrain material fix — plan deviation found and corrected during
+    implementation**: the original plan (approved before implementation)
+    called for a triplanar-mapped height gradient texture. While
+    implementing it, realized this was actually wrong: standard triplanar's
+    top-facing projection (the dominant one on this mostly-flat/rolling
+    terrain, since normals point mostly straight up) samples using world
+    X/Z, not height — a vertical gradient texture sampled that way would
+    not read as height-based color on the terrain's primary visible
+    surface at all. Fixed correctly instead with **height-based vertex
+    colors** baked directly into the mesh in `ArenaTerrain.build_mesh()`
+    (`_height_color()`, a 2-segment loam→moss→rock gradient) — needs no
+    UVs, and `Arena._build_terrain_body()` just sets
+    `StandardMaterial3D.vertex_color_use_as_albedo = true` to use them.
+    This does touch `ArenaTerrain.gd`, which the original plan said
+    wouldn't be needed — a deliberate, disclosed correction, not scope
+    creep for its own sake.
+  - **Lighting/environment** (`Arena_Test01.tscn`, Compatibility-renderer-safe
+    — confirmed via `project.godot` that this project uses
+    `gl_compatibility`, ruling out SSAO/SSR/SDFGI/VoxelGI): found and fixed
+    a concrete, high-value bug — `ambient_light_source` was `2`
+    (`AMBIENT_SOURCE_COLOR`, flat white, completely ignoring the sky)
+    instead of `3` (`SKY`). Added fog (`fog_depth_begin ≈ 45`, low density,
+    horizon-matched color) that only softens the far arena boundary, not
+    mid-fight visibility. `DirectionalLight3D` tuned: `light_energy` 1.0 →
+    1.4 (compensates for Compatibility's lack of bounce light), warm tint,
+    lower/non-cardinal angle for more defined shadows.
+  - **Reskin pass for consistency**: found and fixed a real pre-existing
+    bug while touching this file — `CRATE_SIZE`/`COLUMN_SIZE` collision
+    constants didn't match the real crate.glb/column.glb mesh sizes at all
+    (the column collider was ~15x the true mesh volume), confirmed by
+    parsing those glb files' own bounds too. Also added a shared
+    `_structural_material()` helper (a seeded — fixed seed, not the
+    gameplay `_rng`, since it's a texture pattern not a gameplay
+    choice — `NoiseTexture2D` + triplanar mottled speckle, safe here since
+    it has no directional meaning to get wrong, unlike the terrain case
+    above) applied to platforms/ramps/loose wall segments so they no
+    longer look like flat leftover boxes next to the new textured
+    structures/crates/columns.
+  - **Not verified, needs an actual editor/display pass** (headless has no
+    rendering, flagged clearly rather than claimed): whether corner pieces
+    are actually yaw-correct (see above), whether the vertex-color terrain
+    gradient reads well, and whether the tuned lighting/fog/materials
+    genuinely look good together — check against a few different seeds.
+  - **Follow-up by request: ground is flat again.** With structures/
+    lighting/materials now carrying the visual interest, rolling-hill
+    terrain was reverted: `ArenaTerrain.NOISE_AMPLITUDE` set to `0.0` (was
+    `12.0`, kept in a comment as the value to restore if hills come back).
+    The rest of the terrain pipeline (noise generation, `clamp_slopes()`,
+    `flatten_patch()`, vertex coloring) is untouched and still runs — at
+    amplitude 0 every height comes out exactly 0, so it's all a no-op
+    rather than dead/removed code, and re-enabling hills later needs no
+    other changes. Fixed a real divide-by-zero this exposed:
+    `_height_color()`'s gradient math divides by `NOISE_AMPLITUDE`, which
+    would have produced `NaN` vertex colors at amplitude 0 — added a guard
+    that returns the flat mid (mossy-green) color instead. Verified
+    directly: sampled terrain height at 4 different world positions, all
+    exactly `0.0`, and every character spawns flush with the ground
+    (~0.001 units, physics settle only).
+
 **Balance/tuning notes** (current values live in `scripts/util/Constants.gd`):
 - Weapon: 14 dmg / 0.35s cooldown (~8 hits to kill from full HP).
-- Head growth: 25s to reach max size (1.0x → 3.0x), so it's visible within
-  a normal life.
-- Explosion at max head growth: radius up to 75, damage up to 800 — kills
-  most/all of the map from a typical death location, not literally
-  guaranteed from every possible corner-to-corner distance.
+- Head growth: 25s to reach max size (1.0x → 6.0x, doubled from 3.0x by
+  request — `Constants.HEAD_MAX_SCALE`), so it's visible within a normal
+  life. Head hitbox radius/health-bar height/explosion size all read
+  head_scale or the normalized 0-1 ratio directly, so doubling this needed
+  no other code changes — verified directly (fast-forwarded growth,
+  confirmed hitbox radius and health-bar height both scaled correctly to
+  match the taller head).
+- Explosion at max head growth: radius up to 150, damage up to 1600 (both
+  doubled by request from 75/800, via `Constants.EXPLOSION_MAX_RADIUS_MULT`
+  25.0→50.0 and `EXPLOSION_MAX_DAMAGE_MULT` 20.0→40.0) to match the doubled
+  head growth above — `EXPLOSION_MAX_FORCE_MULT` (knockback) was
+  deliberately left unchanged, only radius/damage were requested. Explosion
+  scaling reads the normalized 0-1 head-scale *ratio*
+  (`get_head_scale_ratio()`), not the absolute head_scale value, so it was
+  unaffected by the head-growth-doubling change on its own and needed this
+  separate tuning pass to actually scale up the payoff to match the now
+  visually-bigger head. At this radius, an explosion covers most/all of the
+  map from a typical death location, not literally guaranteed from every
+  possible corner-to-corner distance.
 - Movement speed scales down to 50% at max head growth (bigger head =
   slower, easier target — the tradeoff for the bigger explosion).
 - `Constants.BOTS_CAN_FIRE` — a test-only toggle added while debugging
@@ -728,3 +841,13 @@ Nothing here is committed to — just candidates to pick from next session.
 	  them), see the Stage 3 bug-hunt entry above.
 - [x] Sync ammo/reload state to the owning client — done, see the Stage 3
 	  bug-hunt entry above.
+- [x] Arena visuals rework (grid-based modular structures, terrain vertex
+	  coloring, lighting/fog, material reskin) — done, see the "Done so far"
+	  entry above.
+- [ ] Visually verify `Arena.CORNER_YAW_DEGREES` in the editor and fix if
+	  wrong (very likely, per the entry above — can't be determined without
+	  actually seeing the models rendered).
+- [ ] Do a real editor/display pass over a few different arena seeds to
+	  confirm the new terrain vertex-color gradient, lighting/fog, and
+	  reskinned materials actually look good together (headless-verified
+	  for correctness/determinism only, not visual quality).

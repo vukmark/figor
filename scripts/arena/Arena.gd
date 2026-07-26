@@ -3,16 +3,25 @@ extends Node3D
 
 const CRATE_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/crate.glb")
 const COLUMN_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/column.glb")
+const WALL_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/wall.glb")
+const WALL_CORNER_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/wall-corner.glb")
+const WALL_DOORWAY_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/wall-doorway.glb")
+const FLOOR_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/floor-square.glb")
 
 const PLAY_HALF_EXTENT := 40.0
 const MIN_DIST_FROM_SPAWN := 6.0
 const OVERLAP_MARGIN := 1.5
 const MAX_PLACEMENT_ATTEMPTS := 60
 
-const CRATE_SIZE := Vector3(1, 1, 1)
-const CRATE_HEIGHT_OFFSET := 0.5
-const COLUMN_SIZE := Vector3(1, 3, 1)
-const COLUMN_HEIGHT_OFFSET := 1.5
+## Real mesh sizes, confirmed by parsing crate.glb/column.glb's own glTF
+## accessor bounds directly — these previously didn't match the actual
+## models at all (collider up to 15x too big for column.glb), a
+## pre-existing bug unrelated to anything else in this pass, fixed while
+## touching this file.
+const CRATE_SIZE := Vector3(0.5, 0.5, 0.5)
+const CRATE_HEIGHT_OFFSET := 0.25
+const COLUMN_SIZE := Vector3(0.2, 1.0, 0.2)
+const COLUMN_HEIGHT_OFFSET := 0.5
 
 const WALL_THICKNESS := 0.6
 const WALL_HEIGHT := 3.5
@@ -28,6 +37,34 @@ const RAMP_RUN := 6.0
 const RAMP_WIDTH := 3.5
 const RAMP_THICKNESS := 0.4
 const SIDE_DIRECTIONS := [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(-1, 0, 0)]
+
+## Small walled compounds assembled from the Kenney modular wall kit, snapped
+## to its native 1-unit grid — an intentional structure (real corners/
+## doorway) instead of the scattered flat-color boxes everything else here
+## still uses. Kit pieces are modeled at 1m/cell (confirmed by parsing the
+## glb files' own mesh bounds directly) with a base-center pivot; native
+## wall height (1m) is too short for a 1.8m-tall Character, so the whole
+## structure is scaled up as one unit rather than hand-scaling every piece.
+const STRUCTURE_SCALE := 2.5
+const STRUCTURE_COUNT_MIN := 3
+const STRUCTURE_COUNT_MAX := 5
+const STRUCTURE_INTERIOR_MIN := 3
+const STRUCTURE_INTERIOR_MAX := 6
+const STRUCTURE_WALL_COLLISION_SIZE := Vector3(0.2, 1.0, 1.0)
+const STRUCTURE_CORNER_COLLISION_SIZE := Vector3(1.0, 1.0, 1.0)
+
+## First-guess yaw per corner (degrees), keyed by (is_max_i, is_max_j) —
+## wall-corner.glb's facing direction can't be determined from mesh bounds
+## alone (bounds are symmetric regardless of which way the model actually
+## faces), so this needs a one-time visual check in the editor and is very
+## likely to need adjusting (shifting all four values by the same 90°
+## offset, or reversing the sequence, are the two most likely fixes).
+const CORNER_YAW_DEGREES := {
+	Vector2i(0, 0): 0.0,
+	Vector2i(1, 0): 90.0,
+	Vector2i(1, 1): 180.0,
+	Vector2i(0, 1): 270.0,
+}
 
 @onready var nav_region: NavigationRegion3D = $NavRegion
 @onready var spawn_points_root: Node3D = $SpawnPoints
@@ -106,7 +143,11 @@ func _build_terrain_body() -> void:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = _terrain.build_mesh()
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.35, 0.37, 0.4, 1)
+	# Color comes from per-vertex data baked into the mesh by
+	# ArenaTerrain.build_mesh() (see its doc comment for why a texture-based
+	# approach like triplanar wasn't actually correct here) — this just
+	# tells the material to use it instead of a flat albedo_color.
+	mat.vertex_color_use_as_albedo = true
 	mesh_instance.material_override = mat
 	body.add_child(mesh_instance)
 
@@ -122,13 +163,21 @@ func _get_terrain_height(x: float, z: float) -> float:
 ## placement changes. Navmesh baking happens at runtime (see _ready), after
 ## these are placed, so it always reflects the layout that was just rolled.
 func _generate_obstacles() -> void:
-	# Platforms placed first so they get first pick of open ground — walls
-	# and crates fill in around whatever space is left.
+	# Structures placed first, before platforms — they're the most
+	# position-constrained (largest footprints) and the main visual
+	# anchors, so they get first pick of open ground, same rationale
+	# platforms already got before structures existed.
+	var structure_count := _rng.randi_range(STRUCTURE_COUNT_MIN, STRUCTURE_COUNT_MAX)
+	for i in range(structure_count):
+		_place_structure()
+
 	var platform_count := _rng.randi_range(PLATFORM_COUNT_MIN, PLATFORM_COUNT_MAX)
 	for i in range(platform_count):
 		_place_platform()
 
-	var wall_count := _rng.randi_range(10, 16)
+	# Trimmed from the original 10-16: structures now share the
+	# sightline-blocking/cover role loose wall segments used to carry alone.
+	var wall_count := _rng.randi_range(6, 10)
 	for i in range(wall_count):
 		_place_wall_segment()
 
@@ -139,6 +188,127 @@ func _generate_obstacles() -> void:
 	var column_count := _rng.randi_range(4, 7)
 	for i in range(column_count):
 		_place_box_obstacle(COLUMN_SCENE, COLUMN_SIZE, COLUMN_HEIGHT_OFFSET)
+
+
+## A small walled compound: a rectangular ring of wall.glb/wall-corner.glb
+## snapped to the kit's native 1-unit grid, with exactly one doorway cell
+## (wall-doorway.glb, deliberately given no collider so bots can path
+## through it — bake_navigation_mesh()'s PARSED_GEOMETRY_STATIC_COLLIDERS
+## mode already only sees what actually has a StaticBody3D/CollisionShape3D,
+## same as every other obstacle here) and floor-square.glb tiling the
+## interior. One StaticBody3D holds every wall/corner CollisionShape3D as a
+## compound collider, mirroring how the terrain's own single StaticBody3D
+## already holds one collision shape + one mesh — same pattern, more shapes.
+func _place_structure() -> void:
+	var interior_w := _rng.randi_range(STRUCTURE_INTERIOR_MIN, STRUCTURE_INTERIOR_MAX)
+	var interior_d := _rng.randi_range(STRUCTURE_INTERIOR_MIN, STRUCTURE_INTERIOR_MAX)
+	var width_cells := interior_w + 2
+	var depth_cells := interior_d + 2
+
+	var rotation_steps := _rng.randi_range(0, 3)
+	var rotated := rotation_steps % 2 == 1
+	var world_w := width_cells * STRUCTURE_SCALE
+	var world_d := depth_cells * STRUCTURE_SCALE
+	var footprint := Vector3(world_d, 0, world_w) if rotated else Vector3(world_w, 0, world_d)
+
+	var pos := _find_valid_position(footprint)
+	if not is_finite(pos.x):
+		return
+
+	_terrain.flatten_patch(Vector2(pos.x, pos.z), max(world_w, world_d) * 0.5 * 1.2)
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	var basis := Basis(Vector3.UP, rotation_steps * (PI / 2.0)).scaled(Vector3.ONE * STRUCTURE_SCALE)
+	body.global_transform = Transform3D(basis, Vector3(pos.x, ground_y, pos.z))
+
+	# Collect straight-perimeter (non-corner) cells first so a doorway cell
+	# can be picked from among them via _rng, same determinism requirement
+	# as every other random choice in this file.
+	var straight_cells: Array[Vector2i] = []
+	for j in range(depth_cells):
+		for i in range(width_cells):
+			var is_perimeter: bool = i == 0 or i == width_cells - 1 or j == 0 or j == depth_cells - 1
+			var is_corner: bool = (i == 0 or i == width_cells - 1) and (j == 0 or j == depth_cells - 1)
+			if is_perimeter and not is_corner:
+				straight_cells.append(Vector2i(i, j))
+	var door_cell := straight_cells[_rng.randi() % straight_cells.size()] if not straight_cells.is_empty() else Vector2i(-1, -1)
+
+	for j in range(depth_cells):
+		for i in range(width_cells):
+			var is_corner: bool = (i == 0 or i == width_cells - 1) and (j == 0 or j == depth_cells - 1)
+			var is_perimeter: bool = i == 0 or i == width_cells - 1 or j == 0 or j == depth_cells - 1
+			var local_x: float = (i + 0.5) - width_cells * 0.5
+			var local_z: float = (j + 0.5) - depth_cells * 0.5
+			var local_pos := Vector3(local_x, 0.0, local_z)
+
+			if is_corner:
+				var corner_key := Vector2i(1 if i == width_cells - 1 else 0, 1 if j == depth_cells - 1 else 0)
+				var yaw: float = deg_to_rad(CORNER_YAW_DEGREES[corner_key])
+				_add_structure_piece(body, WALL_CORNER_SCENE, local_pos, yaw, STRUCTURE_CORNER_COLLISION_SIZE)
+			elif is_perimeter:
+				# Rows (j==0/last) need the wall's native length axis (Z)
+				# rotated onto X; columns (i==0/last) already match natively.
+				var is_row: bool = j == 0 or j == depth_cells - 1
+				var yaw: float = deg_to_rad(90.0) if is_row else 0.0
+				if Vector2i(i, j) == door_cell:
+					_add_structure_piece(body, WALL_DOORWAY_SCENE, local_pos, yaw, Vector3.ZERO)
+				else:
+					_add_structure_piece(body, WALL_SCENE, local_pos, yaw, STRUCTURE_WALL_COLLISION_SIZE)
+			else:
+				var floor_instance := FLOOR_SCENE.instantiate()
+				floor_instance.position = local_pos + Vector3(0, 0.02, 0)
+				body.add_child(floor_instance)
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": footprint})
+
+
+## Adds one wall/corner/doorway piece's visual (always) and collision
+## (skipped when collision_size is Vector3.ZERO — the doorway cell, so bots
+## can path through the gap) as children of `body`, both at the same local
+## cell position/yaw so they never visually drift apart from their collider.
+func _add_structure_piece(body: StaticBody3D, scene: PackedScene, local_pos: Vector3, yaw: float, collision_size: Vector3) -> void:
+	var mesh_instance := scene.instantiate()
+	mesh_instance.position = local_pos
+	mesh_instance.rotate_y(yaw)
+	body.add_child(mesh_instance)
+
+	if collision_size == Vector3.ZERO:
+		return
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = collision_size
+	collision.shape = shape
+	collision.position = local_pos
+	collision.rotate_y(yaw)
+	body.add_child(collision)
+
+
+## Shared material for platforms/ramps/loose wall segments, replacing their
+## previous perfectly flat StandardMaterial3D.albedo_color — pulls them into
+## the same "actually has texture variation" family as the terrain (vertex
+## colors) and the new structures/crates/columns (real Kenney textures).
+## NoiseTexture2D + triplanar is safe here (unlike the terrain height case,
+## see ArenaTerrain.build_mesh()'s doc comment) since it's just a repeating
+## mottled speckle pattern with no directional/world-position meaning to get
+## wrong — it looks fine from any box face. Fixed noise seed since this is a
+## texture pattern, not gameplay RNG (must not touch the seeded _rng).
+func _structural_material(tint: Color) -> StandardMaterial3D:
+	var noise := FastNoiseLite.new()
+	noise.seed = 1
+	noise.frequency = 0.6
+	var noise_tex := NoiseTexture2D.new()
+	noise_tex.noise = noise
+	noise_tex.width = 64
+	noise_tex.height = 64
+	noise_tex.seamless = true
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = tint
+	mat.albedo_texture = noise_tex
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3.ONE * 0.35
+	return mat
 
 
 ## A raised platform with a ramp up one side — real verticality, not just
@@ -178,9 +348,7 @@ func _place_platform() -> void:
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = platform_size
 	mesh_instance.mesh = box_mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.45, 0.42, 0.4, 1)
-	mesh_instance.material_override = mat
+	mesh_instance.material_override = _structural_material(Color(0.45, 0.42, 0.4, 1))
 	platform_body.add_child(mesh_instance)
 
 	var side: Vector3 = SIDE_DIRECTIONS[_rng.randi() % SIDE_DIRECTIONS.size()]
@@ -220,9 +388,7 @@ func _build_ramp(top_point: Vector3, bottom_point: Vector3) -> void:
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = ramp_size
 	mesh_instance.mesh = box_mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.5, 0.48, 0.45, 1)
-	mesh_instance.material_override = mat
+	mesh_instance.material_override = _structural_material(Color(0.5, 0.48, 0.45, 1))
 	body.add_child(mesh_instance)
 
 
@@ -267,9 +433,7 @@ func _place_wall_segment() -> void:
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = box_size
 	mesh_instance.mesh = box_mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.5, 0.48, 0.45, 1)
-	mesh_instance.material_override = mat
+	mesh_instance.material_override = _structural_material(Color(0.5, 0.48, 0.45, 1))
 	body.add_child(mesh_instance)
 
 	_placed.append({"position": body.global_transform.origin, "size": footprint})

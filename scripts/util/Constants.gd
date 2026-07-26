@@ -25,7 +25,7 @@ const CAMERA_PITCH_MIN := -80.0
 const CAMERA_PITCH_MAX := 80.0
 
 const HEAD_MIN_SCALE := 1.0
-const HEAD_MAX_SCALE := 3.0
+const HEAD_MAX_SCALE := 6.0
 const HEAD_TIME_TO_MAX := 25.0
 
 const HEALTH_MAX := 100.0
@@ -59,9 +59,9 @@ const SHOTGUN_RELOAD_TIME := 2.2
 ## and the max radius (75) covers the large majority of the map from most
 ## death locations.
 const EXPLOSION_BASE_RADIUS := 3.0
-const EXPLOSION_MAX_RADIUS_MULT := 25.0
+const EXPLOSION_MAX_RADIUS_MULT := 50.0
 const EXPLOSION_BASE_DAMAGE := 40.0
-const EXPLOSION_MAX_DAMAGE_MULT := 20.0
+const EXPLOSION_MAX_DAMAGE_MULT := 40.0
 const EXPLOSION_BASE_FORCE := 6.0
 const EXPLOSION_MAX_FORCE_MULT := 10.0
 
@@ -71,4 +71,4 @@ const RESPAWN_DELAY := 3.0
 
 ## Match ends when either is reached first, like a classic FFA deathmatch.
 const MATCH_KILL_LIMIT := 15
-const MATCH_TIME_LIMIT := 30.0  # 30s for now, easy to bump back up later
+const MATCH_TIME_LIMIT := 300.0  # 30s for now, easy to bump back up later
