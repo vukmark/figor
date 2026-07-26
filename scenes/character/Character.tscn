@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://scripts/input/PlayerInputProvider.gd" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/WeaponHitscan.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/WeaponShotgun.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/character/HealthBar3D.tscn" id="9"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 0.4
@@ -53,6 +54,8 @@ shape = SubResource("SphereShape3D_head")
 
 [node name="BodyModel" parent="VisualRoot" instance=ExtResource("2")]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+
+[node name="HealthBar3D" parent="VisualRoot" instance=ExtResource("9")]
 
 [node name="CameraRig" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)

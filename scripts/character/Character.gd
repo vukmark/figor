@@ -11,6 +11,7 @@ extends CharacterBody3D
 @onready var input_slot: Node = $InputProviderSlot
 @onready var nav_agent: NavigationAgent3D = $NavigationAgent3D
 @onready var head_hitbox: CollisionShape3D = $HeadHitbox
+@onready var health_bar: HealthBar3D = $VisualRoot/HealthBar3D
 
 ## Fired whenever the active weapon slot changes, so listeners (HUD ammo
 ## display) can re-target which weapon's signals they're reading from
@@ -124,6 +125,28 @@ func _update_camera_active() -> void:
 	# affects this peer's local rendering — other characters (bots, and
 	# eventually remote players) keep rendering their own VisualRoot normally.
 	visual_root.visible = not is_local_view
+
+
+## Clearance above the head hitbox's own (growing) surface, not a fixed
+## world height — a static offset would either sit inside a fully-grown
+## head (3x scale) or float oddly far above a fresh, un-grown one.
+const HEALTH_BAR_HEAD_CLEARANCE := 0.35
+
+## Purely a rendering concern, so — unlike movement/firing below — this runs
+## on every peer unconditionally, not just the authority: HealthComponent's
+## current_health is already replicated to everyone, this just reflects it.
+## Living under VisualRoot means it's already hidden for our own first-person
+## view (via the visible toggle above) and hidden entirely on death (via
+## RespawnComponent hiding the whole Character node) with no extra code.
+func _process(_delta: float) -> void:
+	if health.max_health > 0.0:
+		health_bar.set_ratio(health.current_health / health.max_health)
+	# head_hitbox.position/shape.radius are already updated every physics
+	# frame by HeadGrowth to track the head's true, growing extent — reusing
+	# that here keeps the bar riding just above the head at every growth
+	# stage instead of sitting at one fixed height for the whole match.
+	var head_top: float = head_hitbox.position.y + head_hitbox.shape.radius
+	health_bar.position.y = head_top + HEALTH_BAR_HEAD_CLEARANCE
 
 
 func _physics_process(delta: float) -> void:

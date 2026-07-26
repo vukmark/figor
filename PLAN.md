@@ -285,6 +285,37 @@ reasoning.
   directly: music is playing at match start with the correct track and
   volume (-10 dB), and a full match run stays clean.
 
+- **Floating health bar above characters**: new `scenes/character/HealthBar3D.tscn`
+  (`scripts/character/HealthBar3D.gd`) — two billboarded, unshaded
+  `MeshInstance3D` quads (dark background + green fill), `no_depth_test`
+  so it stays readable through nearby geometry. Lives under each
+  `Character`'s `VisualRoot` — piggybacks on two behaviors that already
+  existed for free: `VisualRoot.visible = not is_local_view` already hides
+  it for your own first-person view, and `RespawnComponent` hiding the
+  whole `Character` node on death already hides it there too, so no new
+  visibility logic was needed. `Character._process()` (new — runs on every
+  peer, not just the authority, since it just reflects the already-networked
+  `HealthComponent.current_health`/`max_health`) calls
+  `HealthBar3D.set_ratio()` every frame; the fill quad shrinks from its
+  right/far edge inward by scaling `Fill.scale.x` and repositioning it to
+  keep the *left* edge pinned to the background's left edge (so it reads as
+  "draining," not shrinking from the center). Verified directly: damaging a
+  bot to 50% health dropped `Fill.scale.x` to exactly `0.5` and repositioned
+  it to the expected `-0.15` (half the 0.6-unit bar width times the drained
+  fraction).
+  **Follow-up (by request)**: initially placed at a fixed height (y=2.6,
+  just clear of even max head growth) — moved to dynamically track the
+  head instead, since a static height either sat inside a fully-grown head
+  or floated oddly far above a fresh one. `Character._process()` now reads
+  `head_hitbox.position.y`/`head_hitbox.shape.radius` (already updated
+  every physics frame by `HeadGrowth` to track the head's true, growing
+  extent — reused rather than duplicated) and repositions the bar to
+  `head_top + HEALTH_BAR_HEAD_CLEARANCE` (0.35) every frame. Verified
+  directly: over several seconds of simulated growth, `head_scale` rose
+  from ~1.01 to ~1.38 and the bar's height tracked the head's rising
+  position + growing radius exactly (e.g. `head_hitbox_y=2.45,
+  radius=0.39` → `bar_y=3.19`, matching `2.45 + 0.39 + 0.35`).
+
 **Bugs found & fixed along the way** (worth knowing about if something
 regresses):
 - Kenney body model was facing the camera instead of the movement-forward
