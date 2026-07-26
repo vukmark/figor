@@ -19,9 +19,11 @@ into other players. Die → respawn with a normal head, timer resets.
 
 - **Stage 1 (current)** — bots-only gameplay, single local host, no real
   network peers yet.
-- **Stage 2 (not started)** — local multiplayer (same machine, split-screen
-  or hotseat).
-- **Stage 3 (not started)** — real networked multiplayer.
+- **Stage 2 — skipped by decision.** Local split-screen/hotseat multiplayer
+  is rare on PC in practice, so we're jumping straight to real networked
+  multiplayer instead of building this.
+- **Stage 3 (up next)** — real networked multiplayer (host/join UI, client
+  prediction).
 
 Architecture is already built multiplayer-ready (server-authoritative
 movement, `MultiplayerSynchronizer`/`MultiplayerSpawner`, RPC-shaped hooks)
@@ -367,7 +369,8 @@ additional game modes (currently implicit free-for-all).
 Nothing here is committed to — just candidates to pick from next session.
 
 - [x] Noise-based terrain (rolling hills) — done, see "Done so far" above.
-- [ ] Stage 2: local multiplayer (split-screen/hotseat)
+- [x] Stage 2: local multiplayer — skipped by decision (split-screen is rare
+	  on PC), see Stages section above.
 - [ ] Stage 3: real networked multiplayer (host/join UI, client prediction)
 - [x] Headshot damage multiplier — done, see "Done so far" above.
 - [x] More weapon variety — done, see "Done so far" above.
