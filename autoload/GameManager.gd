@@ -57,9 +57,12 @@ func register_world(world: Node3D, characters_container: Node3D, fx_container: N
 	_spawn_index = 0
 
 
-## Called once per new match (including restarts) — GameManager is an
-## autoload and its state would otherwise persist stale scores/timers across
-## a fresh match.
+## Called once, at the very first match of a session (Main._ready()) —
+## GameManager is an autoload and its state would otherwise persist stale
+## scores/timers/id-counters from nothing. Restarts use
+## restart_for_new_match() instead (see its own doc comment for why): this
+## full reset, including _next_player_id/_bot_number, would collide with
+## the player_ids already held by characters kept alive across a restart.
 func reset_match() -> void:
 	scores.clear()
 	match_time_remaining = Constants.MATCH_TIME_LIMIT
@@ -69,6 +72,40 @@ func reset_match() -> void:
 	_bot_number = 0
 	_peer_characters.clear()
 	_time_sync_accum = 0.0
+
+
+## Server-only. Resets every currently-connected Character *in place* for a
+## match restart, instead of despawning and respawning them through
+## MultiplayerSpawner. This replaces an earlier despawn/respawn-based
+## restart that reliably corrupted a connected peer's replication state —
+## tried unique node names, queue_free() instead of free(), and extra idle
+## frames between the despawn and respawn bursts, none of which fully fixed
+## it (see PLAN.md for the investigation). Reusing the same nodes and only
+## changing already-continuously-replicated properties (transform, health,
+## head_scale, is_alive via RespawnComponent.force_reset()/HealthComponent/
+## HeadGrowth's own reset() methods) needs no new spawns or despawns at
+## all — it's the exact same sync path normal gameplay already relies on
+## every frame, which is why it's reliable where the spawner burst wasn't.
+## As a side effect this also fixes a second known issue for free: a
+## restart now correctly resets *every* connected peer's character, not
+## just the host + bots.
+func restart_for_new_match() -> void:
+	match_time_remaining = Constants.MATCH_TIME_LIMIT
+	match_over = false
+	scores.clear()
+
+	if characters_root == null:
+		return
+	for c in characters_root.get_children():
+		if not (c is Character):
+			continue
+		# force_reset() -> RespawnComponent._do_respawn() already repositions
+		# to a fresh spawn point and resets health/head growth — no need to
+		# duplicate any of that here.
+		c.respawn.force_reset()
+		scores[c.player_id] = {"name": c.display_name, "kills": 0, "deaths": 0}
+
+	_broadcast_scores()
 
 
 func _process(delta: float) -> void:

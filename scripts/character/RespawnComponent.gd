@@ -29,6 +29,15 @@ func begin_respawn_countdown() -> void:
 	_timer.start()
 
 
+## Used by GameManager.restart_for_new_match() to force a character back to
+## a clean alive state immediately, regardless of whether it was mid-death
+## at the moment of a match restart — cancels any pending countdown first
+## so _do_respawn() doesn't also fire again later on its own.
+func force_reset() -> void:
+	_timer.stop()
+	_do_respawn()
+
+
 func _do_respawn() -> void:
 	var spawn_point: Node3D = GameManager.get_next_spawn_point(_character.player_id)
 	if spawn_point:

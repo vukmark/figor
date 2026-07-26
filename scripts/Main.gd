@@ -85,54 +85,34 @@ func _apply_arena_seed(seed_value: int) -> void:
 
 ## Deliberately avoids NetworkManager/reload_current_scene entirely (that
 ## would tear down and recreate the ENetMultiplayerPeer, risking a port
-## rebind failure) — instead just clears characters and swaps in a fresh
-## Arena instance, which as a bonus gives a new procedural layout each
-## restart, consistent with the "different map every match" design.
+## rebind failure) — instead swaps in a fresh Arena instance (a bonus:
+## a new procedural layout each restart, consistent with the "different map
+## every match" design) and resets existing Characters in place rather than
+## despawning/respawning them.
+##
+## That despawn/respawn approach used to be blocked outright whenever a
+## real peer was connected — freeing a batch of MultiplayerSpawner-tracked
+## Characters and immediately respawning a new batch reliably corrupted
+## that peer's replication state (see GameManager.restart_for_new_match()'s
+## doc comment for the full investigation). Resetting in place needs no
+## spawns/despawns at all, which is what actually fixes this rather than
+## just working around it — restart now works correctly with real peers
+## connected, and as a bonus resets *every* connected peer's character, not
+## just the host + bots.
 func restart_match() -> void:
 	if not NetworkManager.is_server():
 		# Non-authoritative peers must never locally rebuild spawner-owned
 		# state — their own add_child calls wouldn't replicate anyway.
 		return
 
-	if not multiplayer.get_peers().is_empty():
-		# Confirmed by direct testing: despawning every Character and
-		# respawning a fresh batch while a real remote peer is connected
-		# leaves that peer's MultiplayerSpawner replication in a broken
-		# state — post-restart spawns silently fail to reach it (visible as
-		# repeated "Node not found: .../MultiplayerSynchronizer" errors),
-		# even after fixing the immediate-free()-during-despawn race below.
-		# Root cause not fully isolated yet (possibly an engine-level
-		# limitation in how MultiplayerSpawner handles a mass despawn+
-		# respawn burst) — until that's resolved, block restart entirely
-		# while anyone else is connected rather than risk corrupting a live
-		# session for them.
-		push_warning("Main: restart_match() blocked — a real peer is connected. See PLAN.md limitations.")
-		return
-
-	# queue_free(), not free(): an immediate free() deletes the node's
-	# MultiplayerSynchronizer/spawner bookkeeping synchronously, before the
-	# replication system finishes flushing the despawn notification to any
-	# connected client — that race is what produced the "Node not found:
-	# .../MultiplayerSynchronizer" errors seen when restarting with a real
-	# second peer connected. queue_free() keeps the object alive (just
-	# detached from the tree) until the end of the frame, giving that
-	# in-flight network bookkeeping a valid object to finish resolving.
-	for child in characters_root.get_children():
-		characters_root.remove_child(child)
-		child.queue_free()
+	# Explosion.tscn is no longer MultiplayerSpawner-replicated (see
+	# GameManager._spawn_local_explosion) — these are now plain local nodes
+	# on the server, so freeing them here has no cross-peer implications at
+	# all; any lingering copy on a client just finishes its own short
+	# lifetime independently.
 	for child in fx_root.get_children():
 		fx_root.remove_child(child)
 		child.queue_free()
-
-	# _start_match() below immediately reuses the exact same auto-assigned
-	# node names ("Character", "Character2", ...) the just-removed
-	# characters had — spawning new nodes at those NodePaths before the old
-	# ones' queued deletion and despawn replication have actually flushed
-	# caused a NodePath cache collision on connected clients (reproduced: a
-	# hard engine crash during restart with a real second peer connected).
-	# A couple of idle frames lets that settle before anything new spawns.
-	await get_tree().process_frame
-	await get_tree().process_frame
 
 	world.remove_child(arena)
 	arena.free()
@@ -148,9 +128,8 @@ func restart_match() -> void:
 	# geometry first, so this is safe to call again on the same node).
 	_apply_arena_seed.rpc(_arena_seed)
 
-	GameManager.reset_match()
 	GameManager.register_world(world, characters_root, fx_root, arena.get_spawn_points(), arena.get_platform_points())
-	_start_match()
+	GameManager.restart_for_new_match()
 	# Not merely defensive: play_music() no-ops when this track is already
 	# playing, so a restart keeps the music running uninterrupted instead
 	# of jarringly restarting it from 0.

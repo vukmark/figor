@@ -649,6 +649,41 @@ additional game modes (currently implicit free-for-all).
       `death_overlay.visible=true` with the text "Killed by Player /
       Respawning in 1..." on the client — the exact behavior that was
       missing.
+- **`restart_match()` properly fixed, not just worked around**: previously
+  hard-blocked whenever a real peer was connected, because
+  despawning every `Character` and respawning a fresh batch through
+  `MultiplayerSpawner` reliably corrupted that peer's replication state —
+  tried unique node names, `queue_free()` instead of `free()`, and extra
+  idle frames between the despawn/respawn bursts; none of it fully worked
+  (see the earlier restart-corruption entries above). Revisited after the
+  Explosion investigation established a clearer general lesson: bursty
+  spawn/despawn through `MultiplayerSpawner` is inherently fragile, so the
+  right fix is avoiding it, not tuning around it. Applied the same idea
+  here — `GameManager.restart_for_new_match()` now resets every currently-
+  connected `Character` *in place* (reposition/health/head-growth reset
+  via the existing `RespawnComponent._do_respawn()` path, wrapped in a
+  new `RespawnComponent.force_reset()` that cancels any in-progress death
+  countdown first) instead of freeing and respawning anything — no new
+  spawns or despawns happen at all, so this whole class of bug is
+  eliminated by construction rather than mitigated. As a genuine side
+  benefit (not just a workaround-removal), restart now correctly resets
+  *every* connected peer's character, not just the host + bots, fixing a
+  second documented limitation for free. `Main.restart_match()`'s
+  peer-connected guard is removed entirely. `GameManager.reset_match()`
+  (the original full reset, including `_next_player_id`/`_bot_number`) is
+  now used only for the very first match of a session — reusing it for
+  restarts would have collided with the player_ids already held by the
+  characters being kept alive.
+  Verified directly and thoroughly: restarted with a real connected client
+  and confirmed identical `Character` instance IDs before/after (proving
+  reuse, not respawn) on both host and client, scores correctly rebuilt to
+  0/0 for all 7 players (including the client's own), and the client's own
+  character correctly repositioned into the newly-generated arena — all
+  with **zero** replication errors. Followed up by killing every character
+  post-restart: kills/deaths tallied correctly and stayed perfectly in
+  sync between host and client, and a natural (non-scripted) death
+  broadcast during the test also arrived cleanly — confirming ordinary
+  post-restart gameplay isn't just theoretically fine but actually works.
 
 ## Backlog / possible next steps
 
@@ -672,8 +707,9 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] In-game key-rebinding UI (input map already supports it)
 - [ ] Tier 3 polish: minimap/radar, directional damage indicator, player
 	  skins, accessibility options, additional game modes
-- [ ] Investigate why `restart_match()` breaks `MultiplayerSpawner`
-	  replication for an already-connected client (currently hard-blocked
-	  server-side instead of fixed — see the Stage 3 bug-hunt entry above).
+- [x] Fix `restart_match()` breaking `MultiplayerSpawner` replication for
+	  an already-connected client — done (properly fixed, not worked
+	  around: resets characters in place instead of despawning/respawning
+	  them), see the Stage 3 bug-hunt entry above.
 - [x] Sync ammo/reload state to the owning client — done, see the Stage 3
 	  bug-hunt entry above.
