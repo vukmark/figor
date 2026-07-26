@@ -81,9 +81,22 @@ const COLOR_LOW := Color(0.16, 0.14, 0.09)   # dark loam, low ground
 const COLOR_MID := Color(0.32, 0.42, 0.18)   # mossy green, mid elevation
 const COLOR_HIGH := Color(0.55, 0.53, 0.48)  # pale rock, peaks
 
+## Fine-grained color speckling on top of the height gradient above — by
+## request, the ground looked "a bit poor" (flat/plasticky) even with the
+## height gradient in place. A *second*, much higher-frequency noise
+## channel (sampled per-vertex, purely a function of world position, never
+## touching the actual heights array) breaks up flat color bands into
+## something that reads more like a real grass/dirt texture, without any
+## new synced state — every peer computes byte-identical vertex colors from
+## the same seed, exactly like the height noise already does, just a
+## different noise instance/seed offset so the two don't visually correlate.
+const DETAIL_NOISE_FREQUENCY := 0.15
+const DETAIL_COLOR_JITTER := 0.12
+
 var width: int
 var depth: int
 var heights: PackedFloat32Array
+var _detail_noise: FastNoiseLite
 
 
 func generate(rng_seed: int, spawn_positions: Array) -> void:
@@ -91,6 +104,14 @@ func generate(rng_seed: int, spawn_positions: Array) -> void:
 	depth = width
 	heights = PackedFloat32Array()
 	heights.resize(width * depth)
+
+	# Different seed offset than the height noise below so the two don't
+	# visually correlate (a speckle pattern that tracked hills 1:1 would
+	# look like banding, not texture).
+	_detail_noise = FastNoiseLite.new()
+	_detail_noise.seed = rng_seed + 1
+	_detail_noise.noise_type = FastNoiseLite.NoiseType.TYPE_PERLIN
+	_detail_noise.frequency = DETAIL_NOISE_FREQUENCY
 
 	var noise := FastNoiseLite.new()
 	noise.seed = rng_seed
@@ -262,19 +283,26 @@ func get_height(x: float, z: float) -> float:
 	return lerp(h0, h1, fz)
 
 
-## Height fraction mapped through a 2-segment gradient (low->mid->high) —
-## deliberately simple (no slope term) since height alone already fixes the
-## "flat gray" look; slope-based blending is a possible follow-up, not
-## needed for this pass.
-func _height_color(h: float) -> Color:
+## Height fraction mapped through a 2-segment gradient (low->mid->high),
+## then speckled with a small amount of position-based noise (see
+## DETAIL_NOISE_FREQUENCY/DETAIL_COLOR_JITTER's doc comment) so flat-ish
+## areas don't read as a single flat color band.
+func _height_color(h: float, x: float, z: float) -> Color:
+	var base: Color
 	# NOISE_AMPLITUDE == 0 (flat ground) would divide by zero below — every
 	# height is exactly 0 in that case anyway, so just use the mid color.
 	if NOISE_AMPLITUDE <= 0.001:
-		return COLOR_MID
-	var t: float = clamp((h + NOISE_AMPLITUDE) / (2.0 * NOISE_AMPLITUDE), 0.0, 1.0)
-	if t < 0.5:
-		return COLOR_LOW.lerp(COLOR_MID, t / 0.5)
-	return COLOR_MID.lerp(COLOR_HIGH, (t - 0.5) / 0.5)
+		base = COLOR_MID
+	else:
+		var t: float = clamp((h + NOISE_AMPLITUDE) / (2.0 * NOISE_AMPLITUDE), 0.0, 1.0)
+		base = COLOR_LOW.lerp(COLOR_MID, t / 0.5) if t < 0.5 else COLOR_MID.lerp(COLOR_HIGH, (t - 0.5) / 0.5)
+
+	var jitter: float = _detail_noise.get_noise_2d(x, z) * DETAIL_COLOR_JITTER
+	return Color(
+		clamp(base.r + jitter, 0.0, 1.0),
+		clamp(base.g + jitter, 0.0, 1.0),
+		clamp(base.b + jitter, 0.0, 1.0),
+	)
 
 
 ## Built from the exact same height array as build_collision_shape() — the
@@ -296,10 +324,10 @@ func build_mesh() -> ArrayMesh:
 			var p10 := Vector3(x1, h10, z0)
 			var p01 := Vector3(x0, h01, z1)
 			var p11 := Vector3(x1, h11, z1)
-			var c00 := _height_color(h00)
-			var c10 := _height_color(h10)
-			var c01 := _height_color(h01)
-			var c11 := _height_color(h11)
+			var c00 := _height_color(h00, x0, z0)
+			var c10 := _height_color(h10, x1, z0)
+			var c01 := _height_color(h01, x0, z1)
+			var c11 := _height_color(h11, x1, z1)
 			st.set_color(c00)
 			st.add_vertex(p00)
 			st.set_color(c10)

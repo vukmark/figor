@@ -202,13 +202,19 @@ const ROCK_COUNT_MAX := 36
 const ROCK_SCALE_MIN := 0.8
 const ROCK_SCALE_MAX := 1.3
 
-## ~4x the original 10-16, same rationale — plant clusters are the
-## cheapest prop (visual-only, no collision, no _placed bookkeeping), so
-## this is the safest one to scale up generously.
-const PLANT_CLUSTER_COUNT_MIN := 40
-const PLANT_CLUSTER_COUNT_MAX := 56
-const PLANTS_PER_CLUSTER_MIN := 3
-const PLANTS_PER_CLUSTER_MAX := 7
+## Bumped again (~2.5x) by request — "ground is a bit poor, add grass" —
+## plant clusters are the cheapest prop (visual-only, no collision, no
+## _placed bookkeeping), so this is the safest one to scale up generously.
+## Not pushed into the many-hundreds/thousands range in one jump: at that
+## density individual MeshInstance3D nodes per blade stop being the right
+## approach and MultiMeshInstance3D (batched instancing) becomes worth the
+## extra complexity — flagged as the next step if this still isn't enough,
+## not implemented preemptively without being able to actually measure
+## runtime frame rate in this headless-only environment.
+const PLANT_CLUSTER_COUNT_MIN := 100
+const PLANT_CLUSTER_COUNT_MAX := 140
+const PLANTS_PER_CLUSTER_MIN := 4
+const PLANTS_PER_CLUSTER_MAX := 9
 const PLANT_CLUSTER_RADIUS := 3.0
 const PLANT_SCALE_MIN := 0.8
 const PLANT_SCALE_MAX := 1.3
@@ -221,8 +227,13 @@ const STUMP_SCALE_MIN := 0.8
 const STUMP_SCALE_MAX := 1.4
 const LOG_COUNT_MIN := 14
 const LOG_COUNT_MAX := 22
-const LOG_SCALE_MIN := 0.8
-const LOG_SCALE_MAX := 1.4
+## Native log lengths are only ~0.7-1.0 units — reading as small twigs at
+## 0.8-1.4x scale, per real feedback. Bumped to give a real fallen-log
+## presence (proportionally smaller than the tree scale-up, since a log
+## doesn't need to look like a giant redwood — just a substantial section
+## of one).
+const LOG_SCALE_MIN := 3.0
+const LOG_SCALE_MAX := 5.0
 
 ## First-guess yaw per corner (degrees), keyed by (is_max_i, is_max_j) —
 ## wall-corner.glb's facing direction can't be determined from mesh bounds

@@ -12,10 +12,13 @@ cell_size = 0.25
 cell_height = 0.25
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
-sky_top_color = Color(0.38, 0.55, 0.82, 1)
-sky_horizon_color = Color(0.65, 0.7, 0.75, 1)
+sky_top_color = Color(0.2, 0.42, 0.82, 1)
+sky_horizon_color = Color(0.78, 0.82, 0.85, 1)
+sky_curve = 0.12
 ground_bottom_color = Color(0.25, 0.24, 0.22, 1)
-ground_horizon_color = Color(0.65, 0.7, 0.75, 1)
+ground_horizon_color = Color(0.78, 0.82, 0.85, 1)
+sun_angle_max = 22.0
+sun_curve = 0.15
 
 [sub_resource type="Sky" id="Sky_1"]
 sky_material = SubResource("ProceduralSkyMaterial_1")
@@ -27,9 +30,10 @@ ambient_light_source = 3
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_energy = 0.7
 fog_enabled = true
-fog_light_color = Color(0.65, 0.7, 0.75, 1)
-fog_density = 0.006
-fog_depth_begin = 45.0
+fog_light_color = Color(0.78, 0.82, 0.87, 1)
+fog_density = 0.004
+fog_depth_begin = 60.0
+fog_sky_affect = 0.15
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")

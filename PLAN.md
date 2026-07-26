@@ -675,6 +675,55 @@ regresses):
     constant tuning), so full determinism was re-verified: a two-process
     test matched exactly on both hashes with 172 placed obstacles / 402
     total obstacle nodes.
+  - **Follow-up: "logs too small," "ground a bit poor, add grass."** Three
+    changes:
+    - `LOG_SCALE_MIN`/`MAX` raised from `0.8`-`1.4` to `3.0`-`5.0` — native
+      log lengths are only ~0.7-1.0 units, reading as twigs at the old
+      scale. Deliberately more modest than the tree scale-up (a log
+      doesn't need giant-redwood scale, just a believable substantial
+      section of one).
+    - `PLANT_CLUSTER_COUNT_MIN`/`MAX` (40-56 → 100-140) and
+      `PLANTS_PER_CLUSTER_MIN`/`MAX` (3-7 → 4-9) bumped again (~2.5x) for
+      genuine ground-grass coverage. Re-timed generation afterward:
+      still ~3.6s total, barely different from the ~3.5s baseline, even
+      with plant instances jumping from ~189 to 830 — confirms (again)
+      that terrain heightmap generation dominates the cost, not prop
+      count. **Explicitly not pushed further and not converted to
+      `MultiMeshInstance3D`** even though 830 individual visual-only nodes
+      is now in the range where batched instancing starts to matter for
+      *runtime rendering* (a different cost than the generation-time cost
+      just re-verified) — flagged as the likely next step if density still
+      isn't enough, not implemented preemptively since actual frame rate
+      can't be measured in this headless-only environment.
+    - **New**: `ArenaTerrain` now has a second, higher-frequency noise
+      channel (`_detail_noise`, `DETAIL_NOISE_FREQUENCY`/
+      `DETAIL_COLOR_JITTER`) purely for per-vertex color speckling on top
+      of the existing height gradient — addresses "ground looks poor"
+      from a material-quality angle (flat color bands), not just an
+      instance-density angle. Seeded from `rng_seed + 1` (decorrelated
+      from the height noise so speckling doesn't visually track the hills
+      1:1) — a pure function of world position, so it needs no new synced
+      state at all, unlike everything else added this session. Verified:
+      full determinism re-checked with a *third* hash (sampled vertex
+      colors at several world positions) alongside the existing two,
+      all three matched exactly between host and a joining client.
+  - **Follow-up: "skies are boring."** Root cause wasn't the sky's colors —
+    it was `Environment.fog_sky_affect`, which defaults to `1.0` in Godot
+    4 and blends the fog color over the *entire* sky background, not just
+    distant geometry. With a grayish `fog_light_color`, that flattened
+    the whole upper frame into one uniform gray slab regardless of what
+    the `ProceduralSkyMaterial` was actually set to. Fixed in
+    `Arena_Test01.tscn`'s `Environment_1`: dropped `fog_sky_affect` to
+    `0.15` (keeps atmospheric fade on distant terrain, stops it erasing
+    the sky), lowered `fog_density` (0.006 → 0.004) and pushed
+    `fog_depth_begin` out (45 → 60) so nearby foliage stays clear. Also
+    deepened `sky_top_color`, lightened/warmed `sky_horizon_color`,
+    tightened `sky_curve` for a more defined horizon band, and enabled a
+    visible sun glow via `sun_angle_max`/`sun_curve` on
+    `ProceduralSkyMaterial_1` (previously too tight to render at all).
+    Pure resource-property edit, no new nodes/logic, so no determinism
+    concern. Confirmed via screenshot: proper blue gradient sky with a
+    visible glowing sun, no more flat gray wash.
 
 **Balance/tuning notes** (current values live in `scripts/util/Constants.gd`):
 - Weapon: 14 dmg / 0.35s cooldown (~8 hits to kill from full HP).
