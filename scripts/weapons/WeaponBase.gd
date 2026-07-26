@@ -57,7 +57,19 @@ func _ready() -> void:
 	current_ammo = magazine_size
 
 
+## Authority-only (unlike Character._process's health-bar update, which
+## deliberately runs everywhere): ammo/cooldown/reload are gameplay state,
+## not just a display value, so only the server should ever actually tick
+## them down. Without this gate, every peer's own local copy of a weapon
+## independently ticked its own unused numbers, completely disconnected
+## from the server's real state — a client's ammo/reload HUD could show
+## stale or outright wrong values even though firing itself worked
+## correctly server-side. The owning client now gets the real values pushed
+## to it instead (see _sync_ammo_to_owner/_apply_ammo_state below).
 func _process(delta: float) -> void:
+	if not is_multiplayer_authority():
+		return
+
 	_cooldown_remaining = max(_cooldown_remaining - delta, 0.0)
 
 	if is_reloading:
@@ -66,6 +78,7 @@ func _process(delta: float) -> void:
 			is_reloading = false
 			current_ammo = magazine_size
 			ammo_changed.emit(current_ammo, magazine_size)
+			_sync_ammo_to_owner()
 
 
 ## Server-side only in practice (Stage 1 authority owns every Character, so
@@ -83,6 +96,7 @@ func try_fire() -> void:
 	_cooldown_remaining = cooldown
 	current_ammo -= 1
 	ammo_changed.emit(current_ammo, magazine_size)
+	_sync_ammo_to_owner()
 
 	Audio.play_sfx_3d(fire_sound, global_transform.origin)
 	_pending_tracer_from.clear()
@@ -162,6 +176,33 @@ func _start_reload() -> void:
 	_reload_time_remaining = reload_time
 	reload_started.emit(reload_time)
 	Audio.play_sfx_3d(reload_sound, global_transform.origin)
+	_sync_ammo_to_owner()
+
+
+## Ammo/reload is private per-player HUD info, so this targets only the
+## owning peer (never broadcast, unlike _replay_fire_feedback) — bots have
+## no real owning peer (owning_peer_id 0, see GameManager.spawn_character)
+## so there's nobody to sync to. Also skipped for the host's own player:
+## rpc_id() targeting the caller's own peer id errors ("RPC on yourself is
+## not allowed by selected mode") — harmless to skip anyway, since the
+## host's own local copy of current_ammo/is_reloading already *is* the
+## authoritative value, nothing to sync.
+func _sync_ammo_to_owner() -> void:
+	if _character == null or _character.owning_peer_id <= 0:
+		return
+	if _character.owning_peer_id == multiplayer.get_unique_id():
+		return
+	_apply_ammo_state.rpc_id(_character.owning_peer_id, current_ammo, is_reloading)
+
+
+@rpc("authority", "reliable")
+func _apply_ammo_state(ammo: int, reloading: bool) -> void:
+	current_ammo = ammo
+	is_reloading = reloading
+	if reloading:
+		reload_started.emit(reload_time)
+	else:
+		ammo_changed.emit(current_ammo, magazine_size)
 
 
 func _spawn_muzzle_flash() -> void:

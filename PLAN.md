@@ -548,17 +548,36 @@ additional game modes (currently implicit free-for-all).
       hit positions) and broadcast a single `_replay_fire_feedback` RPC
       (`@rpc("authority", "unreliable")`) so every other peer replays the
       same muzzle flash/tracer(s)/fire sound/hit sound/hit-marker locally.
-      Ammo/reload state itself is *not* synced (each peer's own copy of a
-      weapon independently, harmlessly ticks its own unused ammo/cooldown
-      numbers, since only the server's copy is ever actually consulted by
-      `try_fire()`) — a client's own ammo/reload HUD counter can therefore
-      still show stale/wrong numbers even though firing itself now works
-      correctly; flagged as a known follow-up, not fixed this pass (see
-      backlog).
+      Ammo/reload sync (originally deferred here) is now done too — see
+      the dedicated entry below.
     Both fixes verified via the headless repro harness (RPC/replication
     plumbing only — no real display/mouse/audio available headless, so the
     *actual feel* of pitch and fire feedback still needs a real two-window
-    retest).
+    retest). Mouse pitch confirmed fixed by user retest.
+  - **Ammo/reload sync to the owning client**: `WeaponBase._process()`'s
+    cooldown/reload countdown ran unconditionally on every peer's own copy
+    of a weapon — since `try_fire()` (and thus real ammo/reload state) is
+    only ever invoked server-side, every other peer's copy was ticking its
+    own separate, meaningless numbers, and a client's own ammo/reload HUD
+    could show stale or outright wrong values even though firing itself
+    already worked correctly (see fire-feedback fix above). Fixed by
+    gating `_process()`'s countdown logic to `is_multiplayer_authority()`
+    (weapons inherit their owning `Character`'s authority, so this only
+    ever runs server-side now) and adding a targeted (not broadcast —
+    ammo is private per-player info) `_apply_ammo_state`
+    `@rpc("authority", "reliable")`, sent to the owning peer from all three
+    places `current_ammo`/`is_reloading` actually change (firing, starting
+    a reload, reload completing). Real bug caught during verification: the
+    host firing *its own* weapon tried to `rpc_id()` targeting its own peer
+    id, which Godot rejects ("RPC on yourself is not allowed by selected
+    mode") — fixed by skipping the sync entirely when the owning peer is
+    the caller itself (the host's own local copy is already authoritative,
+    nothing to sync). Verified directly via the headless harness: emptied
+    a client's magazine from the host, and the client's own weapon showed
+    `ammo=0/8, is_reloading=true` within 0.3s and recovered to
+    `8/8, is_reloading=false` once the auto-reload completed, matching the
+    server's state exactly at both points, with bots (no real owning peer)
+    correctly never triggering a sync attempt at all.
 
 ## Backlog / possible next steps
 
@@ -585,8 +604,5 @@ Nothing here is committed to — just candidates to pick from next session.
 - [ ] Investigate why `restart_match()` breaks `MultiplayerSpawner`
 	  replication for an already-connected client (currently hard-blocked
 	  server-side instead of fixed — see the Stage 3 bug-hunt entry above).
-- [ ] Sync ammo/reload state to the owning client (currently each peer's
-	  own copy of a weapon ticks its own unused, unsynced ammo/cooldown —
-	  firing itself works correctly, but a client's own ammo/reload HUD
-	  counter can show stale/wrong numbers — see the Stage 3 bug-hunt entry
-	  above).
+- [x] Sync ammo/reload state to the owning client — done, see the Stage 3
+	  bug-hunt entry above.
