@@ -69,12 +69,27 @@ func _detonate() -> void:
 	Audio.play_random_sfx_3d(EXPLOSION_SOUNDS, global_transform.origin, lerp(0.0, 8.0, head_scale_ratio))
 
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		var space_state := get_world_3d().direct_space_state
+		# Explosion spawns at the victim's own origin (feet level, same
+		# convention as Character.gd), which sits right at/in the terrain's
+		# collision surface — raycasting from there would immediately clip
+		# the ground at t≈0 and read as "blocked" for every target. Raise
+		# the ray's start point off the ground the same way the target is
+		# raised to torso height, so it only hits real cover in between.
+		var blast_origin: Vector3 = global_transform.origin + Vector3.UP * 0.9
 		for body in area.get_overlapping_bodies():
 			if body is Character and body.health.is_alive:
-				var offset: Vector3 = body.global_transform.origin - global_transform.origin
+				var target: Vector3 = body.global_transform.origin + Vector3.UP * 0.9
+				var offset: Vector3 = target - global_transform.origin
 				var dist: float = offset.length()
 				var falloff: float = clamp(1.0 - dist / radius, 0.0, 1.0)
 				if falloff <= 0.0:
+					continue
+				# Terrain/obstacles sit on collision layer 1 (characters are
+				# layer 2, excluded here by mask), so a hit means real cover
+				# is blocking line-of-sight to this victim's torso.
+				var query := PhysicsRayQueryParameters3D.create(blast_origin, target, 1)
+				if space_state.intersect_ray(query):
 					continue
 				body.health.take_damage(damage * falloff, killer_player_id)
 				if body.health.is_alive:

@@ -734,18 +734,50 @@ regresses):
   no other code changes — verified directly (fast-forwarded growth,
   confirmed hitbox radius and health-bar height both scaled correctly to
   match the taller head).
-- Explosion at max head growth: radius up to 150, damage up to 1600 (both
-  doubled by request from 75/800, via `Constants.EXPLOSION_MAX_RADIUS_MULT`
-  25.0→50.0 and `EXPLOSION_MAX_DAMAGE_MULT` 20.0→40.0) to match the doubled
-  head growth above — `EXPLOSION_MAX_FORCE_MULT` (knockback) was
-  deliberately left unchanged, only radius/damage were requested. Explosion
-  scaling reads the normalized 0-1 head-scale *ratio*
-  (`get_head_scale_ratio()`), not the absolute head_scale value, so it was
-  unaffected by the head-growth-doubling change on its own and needed this
-  separate tuning pass to actually scale up the payoff to match the now
-  visually-bigger head. At this radius, an explosion covers most/all of the
-  map from a typical death location, not literally guaranteed from every
-  possible corner-to-corner distance.
+- Explosion at max head growth: radius up to 36, damage up to 1600
+  (`Constants.EXPLOSION_MAX_RADIUS_MULT` 50.0→12.0, `EXPLOSION_MAX_DAMAGE_MULT`
+  left at 40.0) — `EXPLOSION_MAX_FORCE_MULT` (knockback) untouched.
+  Explosion scaling reads the normalized 0-1 head-scale *ratio*
+  (`get_head_scale_ratio()`), not the absolute head_scale value.
+- **Follow-up: "kill myself and everyone on the map, hiding behind
+  obstacles didn't help."** Two real problems, not one:
+  - Radius was tuned to 150 (map play area is 240x240), i.e. a routine
+    max-head kill was a guaranteed map-wide wipe, not an occasional
+    climax. Brought `EXPLOSION_MAX_RADIUS_MULT` down to 12.0 (radius 36) —
+    a dangerous room/cluster-sized blast instead of a screen clear.
+  - `ExplosionArea._detonate()` had pure distance-falloff damage with no
+    occlusion check at all, so obstacles never blocked anything regardless
+    of radius. Added a raycast per victim
+    (`PhysicsRayQueryParameters3D.create(origin, victim_torso, 1)`) before
+    applying damage — mask `1` matches the terrain/obstacle collision
+    layer (Character bodies are layer 2/mask 1, set in `Character.tscn`
+    and confirmed via `RespawnComponent.gd`; every obstacle `StaticBody3D`
+    in `Arena.gd` and the terrain body use Godot's default layer 1), so
+    the ray only ever stops on real cover, never on other characters.
+    Verified the layer numbers actually behave this way with a standalone
+    headless functional test (temp scene: layer-1 wall between two
+    points, layer-2 capsule collider at the same spot as the wall) — ray
+    reported blocked with the wall present, ignoring the layer-2 collider
+    entirely, and clear once the wall was removed. Torso target uses
+    victim's origin + 0.9 up (matches `CollisionShape3D`'s capsule offset
+    in `Character.tscn`) rather than the feet-level origin, so the ray
+    doesn't clip through the ground on flat terrain.
+  - **Bug found immediately after shipping the above**: "don't get killed
+    even standing right in front of enemy at 100% head" — the ray's
+    *start* point was still `global_transform.origin` (feet level, same
+    as the victim's own convention), which sits right at/inside the
+    terrain's `HeightMapShape3D` collision surface. Reproduced directly
+    against the real generated terrain (not a synthetic guess): a
+    feet-level-origin ray reported an immediate hit essentially at its
+    own starting position (`position≈(2.0, 1.07, 0.0)` for an origin at
+    `(2.0, ~0, 0.0)`), because the heightmap's interpolated collision
+    surface doesn't line up exactly with `_get_terrain_height()`'s
+    sampled value — so *every* explosion was reading as blocked,
+    regardless of real cover. Fixed by raising the ray's start point the
+    same 0.9 units as the target (`blast_origin`), matching torso height
+    instead of feet/ground level. Re-verified against the real generated
+    terrain: the same two points that falsely blocked at feet level now
+    correctly report clear at torso height.
 - Movement speed scales down to 50% at max head growth (bigger head =
   slower, easier target — the tradeoff for the bigger explosion).
 - `Constants.BOTS_CAN_FIRE` — a test-only toggle added while debugging

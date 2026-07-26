@@ -53,13 +53,13 @@ const SHOTGUN_COOLDOWN := 0.9
 const SHOTGUN_MAGAZINE_SIZE := 2
 const SHOTGUN_RELOAD_TIME := 2.2
 
-## At ratio=1.0 (fully grown head) the radius/damage below are tuned to
-## realistically wipe out most/all of the 100x100 arena — anyone within
-## ~65 units of the blast is guaranteed lethal damage even after falloff,
-## and the max radius (75) covers the large majority of the map from most
-## death locations.
+## At ratio=1.0 (fully grown head) max radius is 36 units — a dangerous
+## room/cluster-sized blast that punishes anyone nearby, but no longer the
+## old 150-unit version that reliably wiped the entire 240x240 arena
+## regardless of where the kill happened. Obstacles now also block line of
+## sight (see ExplosionArea._detonate), so real cover matters at any size.
 const EXPLOSION_BASE_RADIUS := 3.0
-const EXPLOSION_MAX_RADIUS_MULT := 50.0
+const EXPLOSION_MAX_RADIUS_MULT := 12.0
 const EXPLOSION_BASE_DAMAGE := 40.0
 const EXPLOSION_MAX_DAMAGE_MULT := 40.0
 const EXPLOSION_BASE_FORCE := 6.0
