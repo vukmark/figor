@@ -71,4 +71,4 @@ const RESPAWN_DELAY := 3.0
 
 ## Match ends when either is reached first, like a classic FFA deathmatch.
 const MATCH_KILL_LIMIT := 15
-const MATCH_TIME_LIMIT := 300.0  # 30s for now, easy to bump back up later
+const MATCH_TIME_LIMIT := 30.0  # 30s for now, easy to bump back up later

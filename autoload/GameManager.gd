@@ -106,6 +106,18 @@ func restart_for_new_match() -> void:
 		scores[c.player_id] = {"name": c.display_name, "kills": 0, "deaths": 0}
 
 	_broadcast_scores()
+	# match_over was previously only ever pushed one way, true via
+	# _sync_match_ended when a match ends — nothing told a client it went
+	# back to false on restart, so a client's own copy stayed stuck showing
+	# the game-over screen forever after a real server-side restart (a real
+	# user report: restarting on the host worked, but a connected client
+	# never left the "match ended" screen except by leaving and rejoining).
+	_sync_match_restarted.rpc()
+
+
+@rpc("authority", "reliable")
+func _sync_match_restarted() -> void:
+	match_over = false
 
 
 func _process(delta: float) -> void:

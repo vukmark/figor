@@ -684,6 +684,21 @@ additional game modes (currently implicit free-for-all).
   sync between host and client, and a natural (non-scripted) death
   broadcast during the test also arrived cleanly — confirming ordinary
   post-restart gameplay isn't just theoretically fine but actually works.
+  **One more real bug found right after**: user report — restarting on the
+  host worked correctly there, but a connected client's game-over screen
+  never went away (only leaving and rejoining fixed it). Cause:
+  `GameManager.match_over` had only ever been pushed one direction, to
+  `true`, via `_sync_match_ended` when a match ends — nothing told a
+  client it went back to `false` on restart, so its copy stayed stuck
+  showing the "match ended" screen forever (`HUD._process()` only ever
+  hides the game-over panel once `GameManager.match_over` actually becomes
+  false again). Fixed with a small `_sync_match_restarted`
+  `@rpc("authority", "reliable")` broadcast from
+  `GameManager.restart_for_new_match()`. Verified directly (after first
+  chasing a red herring in my own test's timing, not the code): connected
+  a client, ended the match, and confirmed inside the `match_ended` signal
+  handler itself that `match_over` was `true` at that exact instant on the
+  client, then confirmed it read `false` again once the host restarted.
 
 ## Backlog / possible next steps
 
