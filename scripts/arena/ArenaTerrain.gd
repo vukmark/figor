@@ -7,34 +7,40 @@ extends RefCounted
 ## fixed 1 unit/vertex with no configurable cell size, so CELL_SIZE must
 ## stay 1.0 — the mesh is built from the exact same height array so visuals
 ## and collision can never disagree.
-const HALF_EXTENT := 50.0
+## 3x the original 50.0, by request ("map bigger, at least 3x") — grid
+## resolution scales with this (see width/depth below), so this also means
+## a 9x larger heightmap/mesh/navmesh bake (area scales with the square of
+## a linear dimension) — timed directly after this change, see the doc
+## comment on generate_arena() in Arena.gd for the actual measured cost.
+const HALF_EXTENT := 150.0
 const CELL_SIZE := 1.0
 
-## Amplitude 0 → flat ground (by request, now that structures/lighting/
-## materials carry the visual interest instead of terrain elevation). The
-## rest of the pipeline (noise generation, clamp_slopes, flatten_patch,
-## vertex coloring) is left fully intact and still runs — with amplitude 0
-## every height comes out exactly 0, so all of it is simply a no-op rather
-## than dead code, and bumping this back up later needs no other changes.
-## History: first non-zero attempt used amplitude 2.5 with only a soft
-## box-blur as the slope safety net — technically real elevation, but
-## visually almost imperceptible (worst-case ~11°) at first-person eye
+## Rolling hills restored by request, now that flat-ground-only building
+## structures are disabled again (see Arena.STRUCTURE_COUNT_MIN/MAX) and
+## the arena is going for a natural/nature-kit look instead — flat ground
+## was only ever needed to give those structures a flat footprint.
+## History: briefly set to 0.0 (flat) while the structure system was
+## active; before that, first non-zero attempt used amplitude 2.5 with only
+## a soft box-blur as the slope safety net — technically real elevation,
+## but visually almost imperceptible (worst-case ~11°) at first-person eye
 ## height. Bumping amplitude to fix that pushed worst-case *single-cell*
 ## slope as high as ~40° on some seeds (a soft blur only reduces slopes on
 ## average, it doesn't bound the worst case) — too close to
 ## CharacterBody3D's ~45° floor_max_angle for comfort. Fixed properly with
 ## clamp_slopes() below, an explicit iterative relaxation that
 ## mathematically guarantees no adjacent grid cells ever exceed
-## MAX_SLOPE_DEGREES regardless of amplitude — settled on 12.0 before this
-## change, kept here (in this comment) as the value to restore if rolling
-## hills come back.
+## MAX_SLOPE_DEGREES regardless of amplitude, which is what actually lets
+## amplitude go this high safely.
 const NOISE_FREQUENCY := 0.025
-const NOISE_AMPLITUDE := 0.0
+const NOISE_AMPLITUDE := 12.0
 const FRACTAL_OCTAVES := 3
 const FRACTAL_GAIN := 0.4
 
-## Smoothstep-falloff-to-flat near the perimeter walls, so terrain always
-## meets their flat base with no gap or clipping.
+## Smoothstep-falloff-to-flat near the map edge — originally so terrain met
+## the (now-removed, see build_boundary_ridge() below) perimeter walls'
+## flat base with no gap; kept as-is since it still serves a purpose: a
+## clean, predictable (non-noisy) base for the boundary ridge to rise from,
+## rather than a bumpy one.
 const BORDER_FLATTEN_MARGIN := 4.0
 
 ## Cosmetic only (removes single-cell jaggies) — clamp_slopes() below is
@@ -46,6 +52,22 @@ const SLOPE_SMOOTH_PASSES := 1
 ## edge into "stuck."
 const MAX_SLOPE_DEGREES := 28.0
 const MAX_SLOPE_CLAMP_ITERATIONS := 25
+
+## Replaces the old invisible perimeter walls: a deliberately steep, narrow
+## ring of terrain right at the map edge that a player physically cannot
+## climb, instead of an artificial collision box. Rising RIDGE_HEIGHT over
+## just RIDGE_MARGIN horizontal units gives a slope of atan(20/4) ≈ 79° on
+## average and steeper still at the steepest single cell (smoothstep's
+## derivative peaks at its midpoint, giving a worst-case single-cell slope
+## around 82° by the same napkin math already used to justify
+## MAX_SLOPE_DEGREES's own worst-case bound) — both are far past
+## CharacterBody3D's ~45° floor_max_angle, so move_and_slide() simply won't
+## climb it. Must run *after* clamp_slopes(), never before or again
+## afterward, or clamp_slopes()'s own guarantee (no adjacent cells differ by
+## more than a climbable amount, *anywhere*) would immediately flatten this
+## back down to something climbable.
+const RIDGE_MARGIN := 4.0
+const RIDGE_HEIGHT := 20.0
 
 ## Height-based vertex coloring, baked directly into the mesh rather than a
 ## texture. A texture-based approach (e.g. triplanar) was considered first,
@@ -124,6 +146,25 @@ func _relax_pair(idx_a: int, idx_b: int, max_delta: float) -> bool:
 	heights[idx_a] += excess
 	heights[idx_b] -= excess
 	return true
+
+
+## Call after clamp_slopes(), and never call clamp_slopes() again
+## afterward — see RIDGE_MARGIN/RIDGE_HEIGHT's doc comment for why order
+## matters here. Adds height on top of whatever's already there (rather
+## than setting it outright) so the ridge still visually follows the
+## existing rolling terrain/vertex-color shape instead of becoming a
+## harsh flat plateau — RIDGE_HEIGHT dominates the interior's own
+## NOISE_AMPLITUDE regardless, so the result reads clearly as a boundary
+## cliff either way.
+func build_boundary_ridge() -> void:
+	for j in range(depth):
+		for i in range(width):
+			var x := _grid_to_world_x(i)
+			var z := _grid_to_world_z(j)
+			var dist_to_edge: float = min(HALF_EXTENT - abs(x), HALF_EXTENT - abs(z))
+			if dist_to_edge < RIDGE_MARGIN:
+				var t: float = clamp(dist_to_edge / RIDGE_MARGIN, 0.0, 1.0)
+				heights[_idx(i, j)] += RIDGE_HEIGHT * (1.0 - smoothstep(0.0, 1.0, t))
 
 
 func _idx(i: int, j: int) -> int:

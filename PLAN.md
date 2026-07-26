@@ -439,6 +439,242 @@ regresses):
     directly: sampled terrain height at 4 different world positions, all
     exactly `0.0`, and every character spawns flush with the ground
     (~0.001 units, physics settle only).
+  - **Follow-up from a real playtest report**: with a real generated arena
+    in front of them, the user confirmed two things — the new rooms'
+    corner walls genuinely don't connect well (matches the
+    `CORNER_YAW_DEGREES` guess flagged above as unverified — still
+    outstanding, needs a screenshot to fix correctly since this
+    environment has no display/rendering), and the *old* loose scattered
+    wall segments (`Arena._place_wall_segment()`, predates the room system)
+    now visually clash with real connected rooms — "random walls over the
+    map, not connected to anything." By request, removed entirely:
+    `_place_wall_segment()` and its now-unused constants
+    (`WALL_THICKNESS`/`WALL_HEIGHT`/`WALL_LENGTH_MIN`/`WALL_LENGTH_MAX`)
+    deleted from `Arena.gd`, and the wall-count generation loop removed
+    from `_generate_obstacles()`. Cover now comes from rooms, platforms,
+    crates, and columns only. Verified: source grep confirms zero
+    remaining references anywhere, and a full arena regen still runs clean
+    (only the pre-existing benign navmesh warnings).
+  - **Strategic pause and pivot**: after seeing the real result, the user's
+    honest assessment was that the remaining "boring" feeling isn't really
+    an algorithm problem — it's an asset-palette problem. The Kenney
+    "environment" kit is a generic flat-shaded gray/beige prototyping kit;
+    no amount of clever room-layout logic changes that ceiling. Multi-floor
+    buildings were discussed and explicitly deprioritized (real stair-
+    collision cost — a stair-mesh visual was already tried and reverted
+    once this session for exactly that reason — and doesn't obviously fit
+    this game's genre: no minimap, no lean/peek mechanics, likely just adds
+    camping corners without payoff). Agreed better lever: pull in a real
+    nature/foliage asset pack instead of more building polish.
+- **Kenney Nature Kit added and scattered across the arena**: downloaded
+  the official free CC0 pack (`https://kenney.nl/assets/nature-kit`, 329
+  models) and dropped the whole thing into `assets/kenney/nature/Models/`
+  (matching this project's existing per-pack convention — confirmed by
+  counting: `environment/Models/` has 145 files, only 6 are ever
+  preloaded/used; curation happens in code, not by hand-picking which
+  files to keep at download time). Curated 6 tree / 5 rock / 6
+  ground-clutter (grass/flowers/mushroom) variants for actual use.
+  - **Measured before guessing**: reused the exact glTF-accessor-bounds
+    parsing already used for `crate.glb`/`column.glb` on all 17 chosen
+    models — confirmed every one has a base pivot (min.y = 0), same
+    convention as the environment kit, so no height offset is needed for
+    any of them. Rock sizes vary ~3x across the chosen variants (0.36 to
+    1.07), too much for one shared collision size like crates/columns
+    get — `ROCK_COLLISION_SIZES` is a per-scene parallel array instead,
+    each one a real measured size. Trees use one shared, deliberately
+    narrow `TREE_TRUNK_SIZE` (0.3×1.5×0.3) rather than the full measured
+    canopy bounds — a full-canopy collision box would block movement/
+    sightlines the visual overhang doesn't really need to block (same
+    "undersizing is safer than oversizing" principle already applied to
+    `CRATE_SIZE`/`COLUMN_SIZE`).
+  - **Three new placement functions** in `Arena.gd`, called from
+    `_generate_obstacles()` last (foliage is the least gameplay-constrained
+    layer, so it fills whatever ground remains rather than competing for
+    the best spots): `_place_tree_cluster()` (one cluster center via the
+    existing `_find_valid_position`, then 3-6 trees scattered within a
+    radius via area-uniform polar sampling — `radius = R * sqrt(rand)`, not
+    `R * rand`, so trees don't bunch artificially at the center; only the
+    cluster center is checked against the rest of the arena, intra-cluster
+    overlap is intentionally unchecked since a copse standing close
+    together is the point, but each tree still registers in `_placed`
+    individually so later placements avoid it); `_place_rock()` (single
+    instance, kept separate from `_place_box_obstacle` rather than
+    generalizing it, specifically to avoid perturbing the existing shared
+    `_rng` draw order crates/columns already depend on); `_place_plant_cluster()`
+    (visual-only ground clutter — deliberately skips
+    `_find_valid_position`/`_clears_obstacles`/`_placed` entirely, since
+    clutter overlapping into tree/rock footprints is the natural look, not
+    a bug — but still draws every value from the seeded `_rng` and does one
+    cheap `_clears_spawns`-only check, since non-deterministic decoration
+    that blocks a sightline differently for different players would be a
+    real competitive-fairness bug, not just a cosmetic one).
+  - Explicitly **not** using `MultiMeshInstance3D` at this density (~50-170
+    new nodes) — trees need real individual collision anyway, so it
+    wouldn't simplify anything; left as a comment for a future pass only if
+    grass density specifically grows into the hundreds/thousands.
+  - Verified directly: a full arena regen runs clean (only pre-existing
+    benign navmesh warnings); source grep confirms zero bare
+    `randi()/randf()` in the new code; and — critically, since plant
+    clusters deliberately never touch `_placed`, so the existing
+    `_placed`-hash determinism check alone would NOT catch a bug there —
+    extended the headless two-process determinism test with a *second*,
+    separate hash covering every visual-only child too. Both hashes
+    (`_placed` content and the new visual-only content) matched exactly
+    between host and a joining client.
+  - **Not verified, needs an actual editor/display pass** (same
+    unavoidable constraint that's come up repeatedly this session — no
+    display in this environment): whether tree clusters actually read as
+    natural clumps rather than a grid, whether density feels like a
+    clearing rather than a lawn or a wasteland, and whether the scale
+    variance looks right. The corner-wall-rotation fix from the previous
+    entry is also still pending a screenshot.
+  - **Follow-up from a real screenshot**: user sent an actual in-game
+    screenshot — trees read as tiny (barely taller than the player), and
+    with rooms/hills both still unresolved from the last couple of
+    entries, decided to drop the room/structure system rather than keep
+    chasing the corner-connection bug, and bring rolling-hill terrain back
+    now that nothing needs a flat building footprint anymore. Three
+    changes:
+    - `Arena.STRUCTURE_COUNT_MIN`/`MAX` set to `0` (was `3`/`5`) — code
+      kept intact, not deleted, same "disable via constant" pattern
+      already used for flat ground, in case structures come back once the
+      corner-yaw issue is actually fixed with real visual feedback.
+    - `ArenaTerrain.NOISE_AMPLITUDE` restored to `12.0` (was `0.0`) — this
+      was literally kept as a comment for exactly this purpose when it was
+      flattened.
+    - `Arena.TREE_SCALE_MIN`/`MAX` raised from `0.85`-`1.25` to `2.5`-`4.0`.
+      Root cause: the chosen tree models' *native* measured mesh heights
+      are only ~1.15-1.7 units (measured directly from the glb files
+      earlier this session) — barely taller than a 1.8-unit-tall
+      `Character`, so at near-native scale they read as shrubs, not trees.
+      Also widened `TREE_CLUSTER_RADIUS` from 5.0 to 7.0 so the now much
+      bigger canopies don't overlap as tightly within a cluster.
+    Verified directly: terrain height now samples a real range (-1.83 to
+    3.11 across several world positions, not a flat `0.0`), zero structure
+    bodies generate, and tree body scales sampled 2.68x-3.91x (previously
+    0.85x-1.25x) — full arena regen still runs clean.
+  - **Follow-up from two more real screenshots**: hills + resized trees
+    confirmed looking good. Remaining visibly unnatural elements: the flat
+    gray perimeter boundary wall, and the boxy gray-textured platform/ramp
+    (visible sitting prominently in one shot). By request, went further
+    toward "map should now be in nature":
+    - **Perimeter boundary walls made invisible** (`Arena_Test01.tscn`):
+      removed the 4 `MeshInstance3D` visuals + their flat-gray
+      `StandardMaterial3D`/`BoxMesh` sub-resources from `Wall_North/South/
+      East/West`, keeping only their `StaticBody3D`/`CollisionShape3D` —
+      the play-area boundary still physically exists (can't walk past it),
+      it's just no longer a visible slab. Chose this over removing the
+      boundary's collision entirely, which would need new out-of-bounds
+      handling that wasn't asked for — flagging this choice explicitly in
+      case a more "natural-looking" boundary (e.g. a rock ridge, dense
+      tree wall) is wanted later instead of invisible-but-solid.
+    - **Platforms/ramps and crates/columns disabled** (count `0`, code kept
+      intact — same pattern as everything else disabled this session):
+      `PLATFORM_COUNT_MIN`/`MAX`, and two *new* named constants
+      `CRATE_COUNT_MIN`/`MAX`/`COLUMN_COUNT_MIN`/`MAX` (previously inline
+      `randi_range(8,14)`/`randi_range(4,7)` calls in
+      `_generate_obstacles()`, pulled out to named constants specifically
+      so they could be disabled the same documented way as everything
+      else). The arena is now terrain (hills) + trees + rocks + ground
+      clutter only — no more industrial/flat-color obstacles at all.
+    Verified directly: all 4 boundary walls confirmed `has_mesh=false,
+    has_collision=true`; the only `StaticBody3D`s left under `Obstacles`
+    are trees/rocks (43 of them, scale range 0.81-3.99, matching their
+    respective tuned ranges with nothing left over from platforms/crates/
+    columns); full arena regen still runs clean.
+  - **Follow-up: trees still read as too small even at 2.5x-4x.** Pushed
+    much further — `TREE_SCALE_MIN`/`MAX` from `2.5`/`4.0` to `5.0`/`8.0`,
+    and `TREE_CLUSTER_RADIUS` from `7.0` to `11.0` to keep the now much
+    wider canopies (up to ~6.8 units across) from crowding within a
+    cluster. Verified directly: sampled tree body scales now land at
+    5.14x-7.97x, giving an effective world height around 8.8-13.6 units
+    for the tallest chosen tree variant — roughly 5x-7.5x a 1.8-unit-tall
+    `Character`, solidly in real tree-to-human proportion territory rather
+    than "somewhat taller than a person."
+  - **Map tripled in size, invisible walls replaced with an unclimbable
+    terrain ridge**: `ArenaTerrain.HALF_EXTENT` 50→150, `Arena.PLAY_HALF_EXTENT`
+    40→120 (kept at the same 80% ratio to `HALF_EXTENT` as before, so
+    props/spawns fill proportionally more of the map rather than staying
+    clustered in a small area of a much bigger terrain). Spawn point marker
+    positions in `Arena_Test01.tscn` scaled 3x to match (e.g. ±40→±120,
+    ±28→±84).
+    - **Boundary ridge, not a wall**: added `ArenaTerrain.build_boundary_ridge()`,
+      a deliberately steep, narrow (4-unit) rise in terrain height right at
+      the map edge — 20 units of height gained over just 4 horizontal
+      units gives a slope classifiers `CharacterBody3D.move_and_slide()`
+      simply won't climb (~45° `floor_max_angle`). The tricky part:
+      `clamp_slopes()` mathematically guarantees the *entire* heightmap
+      stays within a climbable ~28° everywhere, so the ridge has to be
+      built *after* clamp_slopes() runs (and clamp_slopes() must never run
+      again afterward), or it would just get flattened back down —
+      documented as a hard ordering requirement in both the new method's
+      doc comment and the `generate_arena()` call site. The 4 invisible
+      perimeter wall `StaticBody3D`s in `Arena_Test01.tscn` are removed
+      entirely — the ridge is now the only thing containing players.
+    - Verified directly: sampled slope near the edge measured 82.3°
+      (matches the hand-calculated worst-case estimate in the doc comment,
+      well past the climbable limit), terrain height rises from ~4.9
+      (interior) to ~9.0 (near edge) as expected, all spawned characters
+      landed on valid ground, and a full two-process determinism test
+      (host + joining client) — extended with a *third* hash covering raw
+      terrain height samples across the whole map, not just placed
+      obstacles/plants like before — matched exactly on all three hashes.
+    - **Real performance cost found and disclosed, not hidden**: the
+      3x-bigger map means a 9x larger heightmap/mesh/navmesh (area scales
+      with the square of a linear dimension) — timed directly:
+      `generate_arena()` now takes about **3.5 seconds** total (~1.8s for
+      terrain+obstacles, ~1.7s for navmesh baking) versus what was surely
+      well under a second before at the old grid size. This runs at the
+      start of every match and every restart. Not fixed in this pass —
+      flagged for a decision: is a ~3.5s pause at match start/restart
+      acceptable, or is it worth investing in a fix (e.g. a loading
+      indicator, or making `CELL_SIZE` configurable to trade terrain
+      resolution for speed — currently hardcoded to `1.0` and the
+      world-to-grid math assumes it throughout, so that specific fix would
+      be a real refactor, not a quick tweak)?
+    - **Also not addressed, flagged for awareness**: prop counts (tree
+      clusters, rocks, plant clusters, etc.) were not increased alongside
+      the 9x larger area — the same absolute counts spread over a much
+      bigger map will likely read as noticeably sparser/emptier than
+      before. Not changed since it wasn't asked for, but worth deciding
+      explicitly rather than leaving as an accidental side effect.
+  - **Follow-up confirmed by a real screenshot**: "still looks empty" —
+    the density gap flagged above was real. `TREE_CLUSTER_COUNT_MIN`/`MAX`
+    (5-8 → 20-30), `ROCK_COUNT_MIN`/`MAX` (6-10 → 24-36), and
+    `PLANT_CLUSTER_COUNT_MIN`/`MAX` (10-16 → 40-56) all roughly
+    quadrupled — not the full 9x the area grew by, since trees are the
+    most expensive prop (their own `StaticBody3D` + collider each) and
+    generation was already measured at ~3.5s; deliberately scaled cluster
+    *count* rather than trees-per-cluster to grow total tree count without
+    also multiplying per-cluster cost. Verified directly: total prop count
+    went from ~87 to 309 (120 collidable tree/rock bodies + 189 visual-only
+    plant instances), and — the actual risk worth checking — re-timed
+    generation afterward at ~3.2s, essentially unchanged from the ~3.5s
+    baseline (confirms terrain heightmap generation dominates the cost,
+    not obstacle/prop placement, so this density increase was effectively
+    free). Full regen still runs clean; no bare `randi()/randf()`
+    introduced (only existing `_rng.randi_range()` call sites' bounds
+    changed, not new logic, so determinism doesn't need re-verification
+    this time).
+  - **Follow-up: "still only trees," add more detail.** Added two new
+    forest-floor prop categories from the Nature Kit — `_place_stump()`
+    and `_place_log()` (18-28 and 14-22 respectively), structurally
+    identical to `_place_rock()` (own `StaticBody3D` + measured per-scene
+    collision, same reasoning for why each is its own function rather than
+    a shared generalized helper — see `_place_rock()`'s doc comment).
+    Deliberately skipped the pack's `cliff_*` rock-formation models even
+    though they'd give more visual scale variety — those are modular
+    pieces meant to connect edge-to-edge with each other, not standalone
+    props, so placing them individually risked the exact same
+    "looks disconnected" problem that hit the (now-disabled) room
+    structures' corners. Measured real bounds the same verified way as
+    every other prop this session; confirmed `log.glb`/`log_stack.glb` are
+    already modeled lying down (low height, long on one horizontal axis),
+    so no special reorientation was needed beyond the same random yaw
+    every other prop already gets. This *is* new placement logic (not just
+    constant tuning), so full determinism was re-verified: a two-process
+    test matched exactly on both hashes with 172 placed obstacles / 402
+    total obstacle nodes.
 
 **Balance/tuning notes** (current values live in `scripts/util/Constants.gd`):
 - Weapon: 14 dmg / 0.35s cooldown (~8 hits to kill from full HP).
@@ -844,10 +1080,20 @@ Nothing here is committed to — just candidates to pick from next session.
 - [x] Arena visuals rework (grid-based modular structures, terrain vertex
 	  coloring, lighting/fog, material reskin) — done, see the "Done so far"
 	  entry above.
-- [ ] Visually verify `Arena.CORNER_YAW_DEGREES` in the editor and fix if
-	  wrong (very likely, per the entry above — can't be determined without
-	  actually seeing the models rendered).
+- [ ] `Arena.CORNER_YAW_DEGREES`/room structures — **deprioritized**, not
+	  dropped: the structure system is disabled (`STRUCTURE_COUNT_MIN`/`MAX`
+	  = 0, code kept intact) in favor of hills + nature-kit foliage instead.
+	  Revisit only if buildings come back into scope later.
 - [ ] Do a real editor/display pass over a few different arena seeds to
 	  confirm the new terrain vertex-color gradient, lighting/fog, and
 	  reskinned materials actually look good together (headless-verified
 	  for correctness/determinism only, not visual quality).
+- [x] Remove the old loose/disconnected scattered wall segments — done
+	  (removed entirely by request), see the "Done so far" entry above.
+- [x] Add a nature/foliage asset pack (Kenney Nature Kit) and scatter
+	  trees/rocks/plants across the arena — done, see the "Done so far"
+	  entry above.
+- [ ] Do a real editor/display pass to judge the nature-kit scatter
+	  visually now that tree scale/terrain hills have been adjusted from
+	  real screenshot feedback — headless-verified for
+	  determinism/correctness only, actual look still needs the user's eyes.

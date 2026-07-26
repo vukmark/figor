@@ -7,7 +7,7 @@ const GROUP_CHARACTERS := "characters"
 ## normally) so you can verify your own shots actually land and kill,
 ## without bots shooting back or killing each other. Set back to true
 ## afterward for normal gameplay.
-const BOTS_CAN_FIRE := true
+const BOTS_CAN_FIRE := false
 
 const MOVE_SPEED := 6.0
 const SPRINT_SPEED := 9.0

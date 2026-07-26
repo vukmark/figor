@@ -8,7 +8,59 @@ const WALL_CORNER_SCENE: PackedScene = preload("res://assets/kenney/environment/
 const WALL_DOORWAY_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/wall-doorway.glb")
 const FLOOR_SCENE: PackedScene = preload("res://assets/kenney/environment/Models/floor-square.glb")
 
-const PLAY_HALF_EXTENT := 40.0
+## Curated subset of Kenney's Nature Kit (329 models total, dropped in whole
+## at assets/kenney/nature/Models/ per this project's existing per-pack
+## convention — only a handful are actually preloaded/used, same as the
+## environment kit's 145 files vs. 6 used above) — for outdoor atmosphere
+## instead of gray industrial boxes.
+const TREE_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney/nature/Models/tree_default.glb"),
+	preload("res://assets/kenney/nature/Models/tree_detailed.glb"),
+	preload("res://assets/kenney/nature/Models/tree_oak.glb"),
+	preload("res://assets/kenney/nature/Models/tree_pineRoundC.glb"),
+	preload("res://assets/kenney/nature/Models/tree_pineTallA.glb"),
+	preload("res://assets/kenney/nature/Models/tree_fat.glb"),
+]
+const ROCK_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney/nature/Models/rock_largeA.glb"),
+	preload("res://assets/kenney/nature/Models/rock_largeD.glb"),
+	preload("res://assets/kenney/nature/Models/rock_smallA.glb"),
+	preload("res://assets/kenney/nature/Models/rock_smallD.glb"),
+	preload("res://assets/kenney/nature/Models/rock_tallB.glb"),
+]
+const PLANT_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney/nature/Models/grass.glb"),
+	preload("res://assets/kenney/nature/Models/grass_large.glb"),
+	preload("res://assets/kenney/nature/Models/flower_purpleA.glb"),
+	preload("res://assets/kenney/nature/Models/flower_redA.glb"),
+	preload("res://assets/kenney/nature/Models/flower_yellowA.glb"),
+	preload("res://assets/kenney/nature/Models/mushroom_red.glb"),
+]
+## Added for more forest-floor variety beyond "just trees" (real feedback:
+## map still read as "only trees" even at good tree density). Standalone
+## props like crates/rocks, not modular connecting pieces like the wall
+## kit — low risk of the "doesn't connect" problem that hit room corners.
+## Skipped the pack's `cliff_*` rock-formation models for the same reason
+## walls had trouble: they're modular pieces meant to connect to each
+## other, not standalone props, so placing them individually would risk
+## the same "looks disconnected" problem.
+const STUMP_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney/nature/Models/stump_round.glb"),
+	preload("res://assets/kenney/nature/Models/stump_old.glb"),
+	preload("res://assets/kenney/nature/Models/stump_square.glb"),
+]
+const LOG_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney/nature/Models/log.glb"),
+	preload("res://assets/kenney/nature/Models/log_large.glb"),
+	preload("res://assets/kenney/nature/Models/log_stack.glb"),
+]
+
+## 3x the original 40.0, by request — kept proportional to
+## ArenaTerrain.HALF_EXTENT (150.0) the same way it always was (80% of it,
+## same ratio as the original 40/50), so obstacle/prop/spawn placement fills
+## proportionally more of the map instead of staying clustered in a small
+## area of a much bigger terrain.
+const PLAY_HALF_EXTENT := 120.0
 const MIN_DIST_FROM_SPAWN := 6.0
 const OVERLAP_MARGIN := 1.5
 const MAX_PLACEMENT_ATTEMPTS := 60
@@ -23,13 +75,23 @@ const CRATE_HEIGHT_OFFSET := 0.25
 const COLUMN_SIZE := Vector3(0.2, 1.0, 0.2)
 const COLUMN_HEIGHT_OFFSET := 0.5
 
-const WALL_THICKNESS := 0.6
-const WALL_HEIGHT := 3.5
-const WALL_LENGTH_MIN := 6.0
-const WALL_LENGTH_MAX := 14.0
+## Disabled by request (count 0, code kept intact — same "disable via
+## constant" pattern used elsewhere in this file): industrial crate/column
+## props clash with the nature/hill look now that the map is going for
+## outdoor terrain, not gray blocks. Was randi_range(8,14)/randi_range(4,7)
+## inline in _generate_obstacles(), pulled out to named constants here so
+## disabling them follows the same pattern as everything else.
+const CRATE_COUNT_MIN := 0
+const CRATE_COUNT_MAX := 0
+const COLUMN_COUNT_MIN := 0
+const COLUMN_COUNT_MAX := 0
 
-const PLATFORM_COUNT_MIN := 2
-const PLATFORM_COUNT_MAX := 3
+## Disabled by request (count 0, code kept intact — same "disable via
+## constant" pattern as STRUCTURE_COUNT_MIN/MAX and NOISE_AMPLITUDE):
+## flat-color industrial-looking platforms/ramps clash with the nature/hill
+## look now that the map is going for outdoor terrain, not gray blocks.
+const PLATFORM_COUNT_MIN := 0
+const PLATFORM_COUNT_MAX := 0
 const PLATFORM_HEIGHT := 3.0
 const PLATFORM_SIZE_MIN := 7.0
 const PLATFORM_SIZE_MAX := 10.0
@@ -45,13 +107,122 @@ const SIDE_DIRECTIONS := [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(1, 0, 0),
 ## glb files' own mesh bounds directly) with a base-center pivot; native
 ## wall height (1m) is too short for a 1.8m-tall Character, so the whole
 ## structure is scaled up as one unit rather than hand-scaling every piece.
+##
+## Disabled by request (count 0, code kept intact rather than deleted —
+## same pattern as NOISE_AMPLITUDE going to 0.0 for flat ground): the corner
+## pieces never looked properly connected (an unresolved rendering-facing
+## guess, `CORNER_YAW_DEGREES` below, that was never confirmed against an
+## actual screenshot before this), and the arena is going for a natural/
+## nature-kit look instead of boxy rooms now. Bump these back up (and
+## un-flatten the terrain, see ArenaTerrain.NOISE_AMPLITUDE) to bring
+## structures back.
 const STRUCTURE_SCALE := 2.5
-const STRUCTURE_COUNT_MIN := 3
-const STRUCTURE_COUNT_MAX := 5
+const STRUCTURE_COUNT_MIN := 0
+const STRUCTURE_COUNT_MAX := 0
 const STRUCTURE_INTERIOR_MIN := 3
 const STRUCTURE_INTERIOR_MAX := 6
 const STRUCTURE_WALL_COLLISION_SIZE := Vector3(0.2, 1.0, 1.0)
 const STRUCTURE_CORNER_COLLISION_SIZE := Vector3(1.0, 1.0, 1.0)
+
+## Real mesh sizes for the curated Nature Kit selection above, confirmed by
+## parsing each glb's own glTF accessor bounds directly (same verified
+## method as CRATE_SIZE/COLUMN_SIZE, not guessed) — every file measured has
+## min.y == 0 (base pivot, same convention as the environment kit), so no
+## height offset is needed for any of these; they place directly at
+## _get_terrain_height(x, z).
+##
+## Trees: measured bounds are the *whole* mesh (trunk+canopy combined,
+## ranging ~0.39-0.85 wide across the 6 chosen variants) — a full-canopy
+## collision box would block movement/sightlines the visual canopy overhang
+## doesn't really need to block. One shared, deliberately narrower
+## trunk-only approximation is used instead (undersizing is safer than
+## oversizing, same principle already applied to CRATE_SIZE/COLUMN_SIZE),
+## tall enough to still block/cover a standing 1.8m-tall Character.
+const TREE_TRUNK_SIZE := Vector3(0.3, 1.5, 0.3)
+
+## Rocks vary far more in size than trees (0.36 up to 1.07 — roughly 3x, well
+## past the ~40% threshold where one shared size stops being reasonable), so
+## each gets its own measured collision size instead, indexed the same as
+## ROCK_SCENES.
+const ROCK_COLLISION_SIZES: Array[Vector3] = [
+	Vector3(0.79, 0.26, 1.02),  # rock_largeA
+	Vector3(1.07, 0.57, 1.03),  # rock_largeD
+	Vector3(0.36, 0.19, 0.36),  # rock_smallA
+	Vector3(0.43, 0.23, 0.37),  # rock_smallD
+	Vector3(0.77, 0.88, 0.77),  # rock_tallB
+]
+
+## Measured the same verified way as rocks. Stump sizes vary little
+## (~0.32-0.36, well under the ~40% threshold), but per-scene sizes are used
+## anyway since they're already measured and it costs nothing extra.
+const STUMP_COLLISION_SIZES: Array[Vector3] = [
+	Vector3(0.321, 0.206, 0.371),  # stump_round
+	Vector3(0.357, 0.266, 0.371),  # stump_old
+	Vector3(0.36, 0.3, 0.3),       # stump_square
+]
+## log.glb/log_stack.glb are already modeled lying down (low height, long
+## on one horizontal axis) — no reorientation needed, just the same random
+## yaw every other prop here gets.
+const LOG_COLLISION_SIZES: Array[Vector3] = [
+	Vector3(0.234, 0.173, 0.71),  # log
+	Vector3(1.0, 0.417, 0.549),   # log_large
+	Vector3(0.425, 0.346, 0.71),  # log_stack
+]
+
+## ~4x the original 5-8, since the map area itself grew 9x (3x linear) but
+## prop counts didn't scale with it at all — confirmed by a real screenshot
+## report ("still looks empty") after the map-size change. Not a full 9x:
+## trees are the most expensive prop (each gets its own StaticBody3D +
+## collider), and generate_arena() already measured at ~3.5s for the bigger
+## map before this — kept trees-per-cluster unchanged and scaled cluster
+## *count* instead, so total tree count grows roughly in proportion without
+## also multiplying per-cluster cost.
+const TREE_CLUSTER_COUNT_MIN := 20
+const TREE_CLUSTER_COUNT_MAX := 30
+## Widened again alongside the second scale bump below — canopies up to
+## ~0.85*8=6.8 units wide would crowd badly at the previous 7.0 radius.
+const TREE_CLUSTER_RADIUS := 11.0
+const TREES_PER_CLUSTER_MIN := 3
+const TREES_PER_CLUSTER_MAX := 6
+## Native mesh heights for the chosen tree variants are only ~1.15-1.7 units
+## (measured directly from the glb files) — barely taller than a 1.8-unit
+## Character, reading as shrubs rather than trees. First bump (0.85-1.25 →
+## 2.5-4.0, i.e. trees ~2.9-6.8 units tall) still read as too small in a
+## real playtest — pushed further so trees are unambiguously several times
+## taller than a player, closer to real tree-to-human proportions
+## (typically 3x-7x+), not just "somewhat taller."
+const TREE_SCALE_MIN := 5.0
+const TREE_SCALE_MAX := 8.0
+
+## ~4x the original 6-10, same density-vs-bigger-map rationale as
+## TREE_CLUSTER_COUNT above — rocks are cheap (one StaticBody3D each, no
+## clustering), so scaling these directly is low-risk.
+const ROCK_COUNT_MIN := 24
+const ROCK_COUNT_MAX := 36
+const ROCK_SCALE_MIN := 0.8
+const ROCK_SCALE_MAX := 1.3
+
+## ~4x the original 10-16, same rationale — plant clusters are the
+## cheapest prop (visual-only, no collision, no _placed bookkeeping), so
+## this is the safest one to scale up generously.
+const PLANT_CLUSTER_COUNT_MIN := 40
+const PLANT_CLUSTER_COUNT_MAX := 56
+const PLANTS_PER_CLUSTER_MIN := 3
+const PLANTS_PER_CLUSTER_MAX := 7
+const PLANT_CLUSTER_RADIUS := 3.0
+const PLANT_SCALE_MIN := 0.8
+const PLANT_SCALE_MAX := 1.3
+
+## Forest-floor detail props (stumps/logs) — cheap like rocks (one
+## StaticBody3D each, no clustering), scaled at counts comparable to rocks.
+const STUMP_COUNT_MIN := 18
+const STUMP_COUNT_MAX := 28
+const STUMP_SCALE_MIN := 0.8
+const STUMP_SCALE_MAX := 1.4
+const LOG_COUNT_MIN := 14
+const LOG_COUNT_MAX := 22
+const LOG_SCALE_MIN := 0.8
+const LOG_SCALE_MAX := 1.4
 
 ## First-guess yaw per corner (degrees), keyed by (is_max_i, is_max_j) —
 ## wall-corner.glb's facing direction can't be determined from mesh bounds
@@ -122,6 +293,13 @@ func generate_arena(seed_value: int) -> void:
 	# heightmap shift again after an obstacle already read its Y from it,
 	# leaving that obstacle floating/sunken relative to the real terrain.
 	_terrain.clamp_slopes()
+	# Must run right after clamp_slopes(), before anything else samples or
+	# further modifies the heightmap — see build_boundary_ridge()'s own doc
+	# comment for why this ordering is load-bearing (clamp_slopes() must
+	# never run again afterward, or it would flatten the ridge back down to
+	# something climbable). Replaces the old invisible perimeter walls: this
+	# is now the only thing containing players within the map.
+	_terrain.build_boundary_ridge()
 	# Obstacles sample/flatten the heightmap as they place themselves —
 	# the mesh+collision are only built afterward, from the final
 	# (obstacle-flattened) heights, so platforms sit flush instead of
@@ -175,19 +353,36 @@ func _generate_obstacles() -> void:
 	for i in range(platform_count):
 		_place_platform()
 
-	# Trimmed from the original 10-16: structures now share the
-	# sightline-blocking/cover role loose wall segments used to carry alone.
-	var wall_count := _rng.randi_range(6, 10)
-	for i in range(wall_count):
-		_place_wall_segment()
-
-	var crate_count := _rng.randi_range(8, 14)
+	var crate_count := _rng.randi_range(CRATE_COUNT_MIN, CRATE_COUNT_MAX)
 	for i in range(crate_count):
 		_place_box_obstacle(CRATE_SCENE, CRATE_SIZE, CRATE_HEIGHT_OFFSET)
 
-	var column_count := _rng.randi_range(4, 7)
+	var column_count := _rng.randi_range(COLUMN_COUNT_MIN, COLUMN_COUNT_MAX)
 	for i in range(column_count):
 		_place_box_obstacle(COLUMN_SCENE, COLUMN_SIZE, COLUMN_HEIGHT_OFFSET)
+
+	# Foliage last — the least gameplay-constrained layer, so it fills
+	# whatever open ground remains instead of competing with structures/
+	# platforms/crates/columns for the best clearings.
+	var tree_cluster_count := _rng.randi_range(TREE_CLUSTER_COUNT_MIN, TREE_CLUSTER_COUNT_MAX)
+	for i in range(tree_cluster_count):
+		_place_tree_cluster()
+
+	var rock_count := _rng.randi_range(ROCK_COUNT_MIN, ROCK_COUNT_MAX)
+	for i in range(rock_count):
+		_place_rock()
+
+	var stump_count := _rng.randi_range(STUMP_COUNT_MIN, STUMP_COUNT_MAX)
+	for i in range(stump_count):
+		_place_stump()
+
+	var log_count := _rng.randi_range(LOG_COUNT_MIN, LOG_COUNT_MAX)
+	for i in range(log_count):
+		_place_log()
+
+	var plant_cluster_count := _rng.randi_range(PLANT_CLUSTER_COUNT_MIN, PLANT_CLUSTER_COUNT_MAX)
+	for i in range(plant_cluster_count):
+		_place_plant_cluster()
 
 
 ## A small walled compound: a rectangular ring of wall.glb/wall-corner.glb
@@ -403,42 +598,6 @@ func _basis_looking(direction: Vector3) -> Basis:
 	return Basis(x_axis, y_axis, z_axis)
 
 
-## Long, axis-aligned blocking walls — actual cover that breaks sightlines
-## across the arena, unlike a knee-high crate. Built from primitive geometry
-## (not a Kenney tile) since these need arbitrary lengths without visibly
-## stretching a small modular texture.
-func _place_wall_segment() -> void:
-	var length := _rng.randf_range(WALL_LENGTH_MIN, WALL_LENGTH_MAX)
-	var rotated_90 := _rng.randi() % 2 == 0
-	var footprint := Vector3(WALL_THICKNESS, 0, length) if not rotated_90 else Vector3(length, 0, WALL_THICKNESS)
-
-	var pos := _find_valid_position(footprint)
-	if not is_finite(pos.x):
-		return
-
-	var body := StaticBody3D.new()
-	obstacles_root.add_child(body)
-	body.global_transform.origin = Vector3(pos.x, _get_terrain_height(pos.x, pos.z) + WALL_HEIGHT * 0.5, pos.z)
-	if rotated_90:
-		body.rotate_y(deg_to_rad(90.0))
-
-	var box_size := Vector3(WALL_THICKNESS, WALL_HEIGHT, length)
-	var collision := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = box_size
-	collision.shape = shape
-	body.add_child(collision)
-
-	var mesh_instance := MeshInstance3D.new()
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = box_size
-	mesh_instance.mesh = box_mesh
-	mesh_instance.material_override = _structural_material(Color(0.5, 0.48, 0.45, 1))
-	body.add_child(mesh_instance)
-
-	_placed.append({"position": body.global_transform.origin, "size": footprint})
-
-
 func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_offset: float) -> void:
 	var pos := _find_valid_position(box_size)
 	if not is_finite(pos.x):
@@ -457,6 +616,191 @@ func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_off
 	body.add_child(model_scene.instantiate())
 
 	_placed.append({"position": body.global_transform.origin, "size": box_size})
+
+
+## A loose copse of trees rather than one standalone tree — real clearings
+## have clumps with open ground between them, not evenly-spaced singles.
+## Only the cluster center is checked against the rest of the arena via
+## _find_valid_position; trees *within* one cluster are allowed (expected)
+## to stand close together, so intra-cluster overlap isn't checked — but
+## each tree still gets its own _placed entry so later placements (rocks,
+## other clusters) correctly avoid the space it actually occupies.
+func _place_tree_cluster() -> void:
+	var footprint := Vector3(TREE_CLUSTER_RADIUS, 0, TREE_CLUSTER_RADIUS) * 2.2
+	var center := _find_valid_position(footprint)
+	if not is_finite(center.x):
+		return
+
+	var tree_count := _rng.randi_range(TREES_PER_CLUSTER_MIN, TREES_PER_CLUSTER_MAX)
+	for i in range(tree_count):
+		# Uniform point in a disk via sqrt(rand) — area-uniform density, not
+		# radius-uniform (which would over-cluster trees near the center).
+		var angle := _rng.randf_range(0.0, TAU)
+		var radius := TREE_CLUSTER_RADIUS * sqrt(_rng.randf())
+		var tree_pos := center + Vector3(cos(angle), 0, sin(angle)) * radius
+
+		var scene: PackedScene = TREE_SCENES[_rng.randi() % TREE_SCENES.size()]
+		var scale_factor := _rng.randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX)
+		var yaw := _rng.randf_range(0.0, TAU)
+		var ground_y := _get_terrain_height(tree_pos.x, tree_pos.z)
+
+		var body := StaticBody3D.new()
+		obstacles_root.add_child(body)
+		var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale_factor)
+		body.global_transform = Transform3D(basis, Vector3(tree_pos.x, ground_y, tree_pos.z))
+
+		var collision := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = TREE_TRUNK_SIZE
+		collision.shape = shape
+		body.add_child(collision)
+
+		body.add_child(scene.instantiate())
+
+		_placed.append({
+			"position": Vector3(tree_pos.x, 0, tree_pos.z),
+			"size": TREE_TRUNK_SIZE * scale_factor,
+		})
+
+
+## Single standalone rock — structurally like _place_box_obstacle but with
+## per-instance scale/rotation variety and a per-scene collision size (see
+## ROCK_COLLISION_SIZES's doc comment for why rocks can't share one size the
+## way crates/columns/tree trunks do). Kept as its own function rather than
+## generalizing _place_box_obstacle: that function is still used as-is for
+## crates/columns, and adding new _rng draws inside it would reorder the
+## shared random stream those already rely on for determinism.
+func _place_rock() -> void:
+	var index := _rng.randi() % ROCK_SCENES.size()
+	var scale_factor := _rng.randf_range(ROCK_SCALE_MIN, ROCK_SCALE_MAX)
+	var base_size: Vector3 = ROCK_COLLISION_SIZES[index]
+	var box_size := base_size * scale_factor
+
+	var pos := _find_valid_position(box_size)
+	if not is_finite(pos.x):
+		return
+
+	var yaw := _rng.randf_range(0.0, TAU)
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale_factor)
+	body.global_transform = Transform3D(basis, Vector3(pos.x, ground_y, pos.z))
+
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = base_size
+	collision.shape = shape
+	body.add_child(collision)
+
+	body.add_child(ROCK_SCENES[index].instantiate())
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": box_size})
+
+
+## Forest-floor detail, structurally identical to _place_rock() — see that
+## function's doc comment for why this is its own function rather than a
+## generalized shared helper.
+func _place_stump() -> void:
+	var index := _rng.randi() % STUMP_SCENES.size()
+	var scale_factor := _rng.randf_range(STUMP_SCALE_MIN, STUMP_SCALE_MAX)
+	var base_size: Vector3 = STUMP_COLLISION_SIZES[index]
+	var box_size := base_size * scale_factor
+
+	var pos := _find_valid_position(box_size)
+	if not is_finite(pos.x):
+		return
+
+	var yaw := _rng.randf_range(0.0, TAU)
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale_factor)
+	body.global_transform = Transform3D(basis, Vector3(pos.x, ground_y, pos.z))
+
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = base_size
+	collision.shape = shape
+	body.add_child(collision)
+
+	body.add_child(STUMP_SCENES[index].instantiate())
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": box_size})
+
+
+## Forest-floor detail, structurally identical to _place_rock() — see that
+## function's doc comment for why this is its own function. log.glb/
+## log_stack.glb are already modeled lying down (see LOG_COLLISION_SIZES's
+## doc comment), so the same random yaw every other prop gets is enough —
+## no special "lay it down" reorientation needed.
+func _place_log() -> void:
+	var index := _rng.randi() % LOG_SCENES.size()
+	var scale_factor := _rng.randf_range(LOG_SCALE_MIN, LOG_SCALE_MAX)
+	var base_size: Vector3 = LOG_COLLISION_SIZES[index]
+	var box_size := base_size * scale_factor
+
+	var pos := _find_valid_position(box_size)
+	if not is_finite(pos.x):
+		return
+
+	var yaw := _rng.randf_range(0.0, TAU)
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale_factor)
+	body.global_transform = Transform3D(basis, Vector3(pos.x, ground_y, pos.z))
+
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = base_size
+	collision.shape = shape
+	body.add_child(collision)
+
+	body.add_child(LOG_SCENES[index].instantiate())
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": box_size})
+
+
+## Visual-only ground clutter (grass/flowers/mushrooms) — deliberately skips
+## _find_valid_position/_clears_obstacles/_placed entirely. Clutter is
+## expected to overlap into tree/rock footprints (grass growing up around a
+## rock, not avoiding it) and is cheap/non-blocking, so there's nothing to
+## protect other placements from and nothing for other placements to avoid
+## in return. Still draws every value from the seeded _rng — determinism
+## matters even without collision, since non-deterministic decoration could
+## block a sightline differently for different players, a real fairness bug
+## not just a cosmetic one. Does do one cheap _clears_spawns-only check so a
+## spawn point doesn't visually end up buried in a flower patch; if that
+## fails the cluster is just skipped (no retry) since dropping one patch of
+## decoration is harmless, unlike a real obstacle placement.
+func _place_plant_cluster() -> void:
+	var center := Vector3(
+		_rng.randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT), 0,
+		_rng.randf_range(-PLAY_HALF_EXTENT, PLAY_HALF_EXTENT)
+	)
+	if not _clears_spawns(center, Vector3(PLANT_CLUSTER_RADIUS, 0, PLANT_CLUSTER_RADIUS) * 2.0):
+		return
+
+	var plant_count := _rng.randi_range(PLANTS_PER_CLUSTER_MIN, PLANTS_PER_CLUSTER_MAX)
+	for i in range(plant_count):
+		var angle := _rng.randf_range(0.0, TAU)
+		var radius := PLANT_CLUSTER_RADIUS * sqrt(_rng.randf())
+		var plant_pos := center + Vector3(cos(angle), 0, sin(angle)) * radius
+
+		var scene: PackedScene = PLANT_SCENES[_rng.randi() % PLANT_SCENES.size()]
+		var scale_factor := _rng.randf_range(PLANT_SCALE_MIN, PLANT_SCALE_MAX)
+		var yaw := _rng.randf_range(0.0, TAU)
+		var ground_y := _get_terrain_height(plant_pos.x, plant_pos.z)
+
+		var instance := scene.instantiate()
+		instance.position = Vector3(plant_pos.x, ground_y, plant_pos.z)
+		instance.rotate_y(yaw)
+		instance.scale = Vector3.ONE * scale_factor
+		obstacles_root.add_child(instance)
 
 
 func _find_valid_position(footprint: Vector3) -> Vector3:
