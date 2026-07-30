@@ -55,12 +55,9 @@ const LOG_SCENES: Array[PackedScene] = [
 	preload("res://assets/kenney/nature/Models/log_stack.glb"),
 ]
 
-## 3x the original 40.0, by request — kept proportional to
-## ArenaTerrain.HALF_EXTENT (150.0) the same way it always was (80% of it,
-## same ratio as the original 40/50), so obstacle/prop/spawn placement fills
-## proportionally more of the map instead of staying clustered in a small
-## area of a much bigger terrain.
-const PLAY_HALF_EXTENT := 120.0
+## Reverted back to the original 40.0 alongside ArenaTerrain.HALF_EXTENT's
+## own revert back to 50.0 — kept at the same 80% ratio as always.
+const PLAY_HALF_EXTENT := 40.0
 const MIN_DIST_FROM_SPAWN := 6.0
 const OVERLAP_MARGIN := 1.5
 const MAX_PLACEMENT_ATTEMPTS := 60
@@ -99,6 +96,63 @@ const RAMP_RUN := 6.0
 const RAMP_WIDTH := 3.5
 const RAMP_THICKNESS := 0.4
 const SIDE_DIRECTIONS := [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(-1, 0, 0)]
+
+## Hand-placed floating-island cluster — first pass, player-only traversal
+## (bots never path here, see _islands_root's doc comment). No boundary
+## ridge exists anymore (removed by request — the whole perimeter is an
+## open cliff edge now, see generate_arena()'s doc comment). By request,
+## every one of the 4 map edges (not just +X) gets its own near/far island
+## pair — see ISLAND_PAIR_DIRECTIONS and _build_island_pair() — so jumping
+## off any side of the map has somewhere to land, not just one direction.
+##
+## Offsets below are the map edge (ArenaTerrain.HALF_EXTENT) plus a fixed
+## jump-distance offset — kept as the edge-plus-offset the original +X pair
+## was hand-tuned with (running jump ≈8m per SPRINT_SPEED/JUMP_VELOCITY,
+## unaffected by map size) rather than scaled with the map, so the actual
+## jump feel doesn't change when HALF_EXTENT does.
+const ISLAND_PAIR_DIRECTIONS: Array[Vector3] = [
+	Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1),
+]
+## Near island: ~3m past the edge, top a few meters below ground level — a
+## real jump-off-the-cliff drop down onto it, not a level hop (top sits at
+## ISLAND_NEAR_Y + ISLAND_NEAR_HEIGHT/2 = -3.0, comfortably below the main
+## terrain's y=0).
+const ISLAND_NEAR_OFFSET := 10.0
+const ISLAND_NEAR_Y := -6.0
+const ISLAND_NEAR_HEIGHT := 6.0
+const ISLAND_NEAR_TOP_SIZE := Vector2(14.0, 12.0)
+## Wider than the top (mountain-shaped taper, base bigger than summit) —
+## deliberately never the other way around. A narrower *bottom* creates an
+## overhang, and a player jumping up from underneath can wedge into the
+## pocket under that overhang and get stuck (real bug, see git history) —
+## tapering the safe direction keeps the "chunk of rock" look without that
+## trap.
+const ISLAND_NEAR_BOTTOM_SIZE := Vector2(18.0, 15.0)
+## Far island: further out and lower still than the near one (top at
+## ISLAND_FAR_Y + ISLAND_FAR_HEIGHT/2 = -7.0, a further 4m below the near
+## island's top), reachable as a forward jump-and-drop from the near
+## island's far edge, not directly from the main terrain — "another
+## floating island visible below" from the edge.
+const ISLAND_FAR_OFFSET := 32.0
+const ISLAND_FAR_Y := -12.0
+const ISLAND_FAR_HEIGHT := 10.0
+const ISLAND_FAR_TOP_SIZE := Vector2(16.0, 14.0)
+const ISLAND_FAR_BOTTOM_SIZE := Vector2(20.0, 17.0)
+
+## Tint reused across every island for visual consistency with each other
+## (distinct from ArenaTerrain's own vertex-color gradient, but in the same
+## "bare rock" family) — see _structural_material() for how the tint
+## combines with a noise texture.
+const ISLAND_ROCK_TINT := Color(0.4, 0.37, 0.33, 1.0)
+
+## Thin green cap on every island's top face — by request, a bare-rock
+## island top ("Selection_023.png") didn't read like the grassy main
+## terrain at all. Matches ArenaTerrain.COLOR_MID (mossy green) for visual
+## continuity between the main terrain and the islands. See
+## _add_island_grass_cap() for why this is a separate plane rather than a
+## top-face color change on the rock mesh itself.
+const ISLAND_GRASS_TINT := Color(0.32, 0.42, 0.18, 1.0)
+const ISLAND_GRASS_CAP_OFFSET := 0.02
 
 ## Small walled compounds assembled from the Kenney modular wall kit, snapped
 ## to its native 1-unit grid — an intentional structure (real corners/
@@ -169,16 +223,11 @@ const LOG_COLLISION_SIZES: Array[Vector3] = [
 	Vector3(0.425, 0.346, 0.71),  # log_stack
 ]
 
-## ~4x the original 5-8, since the map area itself grew 9x (3x linear) but
-## prop counts didn't scale with it at all — confirmed by a real screenshot
-## report ("still looks empty") after the map-size change. Not a full 9x:
-## trees are the most expensive prop (each gets its own StaticBody3D +
-## collider), and generate_arena() already measured at ~3.5s for the bigger
-## map before this — kept trees-per-cluster unchanged and scaled cluster
-## *count* instead, so total tree count grows roughly in proportion without
-## also multiplying per-cluster cost.
-const TREE_CLUSTER_COUNT_MIN := 20
-const TREE_CLUSTER_COUNT_MAX := 30
+## Reverted back to the original 5-8 alongside the map-size revert (was
+## bumped ~4x when the map temporarily grew 9x in area) — density should
+## match the original, smaller map again.
+const TREE_CLUSTER_COUNT_MIN := 5
+const TREE_CLUSTER_COUNT_MAX := 8
 ## Widened again alongside the second scale bump below — canopies up to
 ## ~0.85*8=6.8 units wide would crowd badly at the previous 7.0 radius.
 const TREE_CLUSTER_RADIUS := 11.0
@@ -194,11 +243,10 @@ const TREES_PER_CLUSTER_MAX := 6
 const TREE_SCALE_MIN := 5.0
 const TREE_SCALE_MAX := 8.0
 
-## ~4x the original 6-10, same density-vs-bigger-map rationale as
-## TREE_CLUSTER_COUNT above — rocks are cheap (one StaticBody3D each, no
-## clustering), so scaling these directly is low-risk.
-const ROCK_COUNT_MIN := 24
-const ROCK_COUNT_MAX := 36
+## Reverted back to the original 6-10 alongside the map-size revert, same
+## rationale as TREE_CLUSTER_COUNT above.
+const ROCK_COUNT_MIN := 6
+const ROCK_COUNT_MAX := 10
 const ROCK_SCALE_MIN := 0.8
 const ROCK_SCALE_MAX := 1.3
 
@@ -211,8 +259,10 @@ const ROCK_SCALE_MAX := 1.3
 ## extra complexity — flagged as the next step if this still isn't enough,
 ## not implemented preemptively without being able to actually measure
 ## runtime frame rate in this headless-only environment.
-const PLANT_CLUSTER_COUNT_MIN := 100
-const PLANT_CLUSTER_COUNT_MAX := 140
+## Scaled down ~4x alongside the map-size revert, same rationale as
+## TREE_CLUSTER_COUNT/ROCK_COUNT above (was 100-140 at the bigger map size).
+const PLANT_CLUSTER_COUNT_MIN := 25
+const PLANT_CLUSTER_COUNT_MAX := 35
 const PLANTS_PER_CLUSTER_MIN := 4
 const PLANTS_PER_CLUSTER_MAX := 9
 const PLANT_CLUSTER_RADIUS := 3.0
@@ -221,12 +271,14 @@ const PLANT_SCALE_MAX := 1.3
 
 ## Forest-floor detail props (stumps/logs) — cheap like rocks (one
 ## StaticBody3D each, no clustering), scaled at counts comparable to rocks.
-const STUMP_COUNT_MIN := 18
-const STUMP_COUNT_MAX := 28
+## Scaled down ~4x alongside the map-size revert, same rationale as
+## TREE_CLUSTER_COUNT/ROCK_COUNT above.
+const STUMP_COUNT_MIN := 5
+const STUMP_COUNT_MAX := 7
 const STUMP_SCALE_MIN := 0.8
 const STUMP_SCALE_MAX := 1.4
-const LOG_COUNT_MIN := 14
-const LOG_COUNT_MAX := 22
+const LOG_COUNT_MIN := 4
+const LOG_COUNT_MAX := 6
 ## Native log lengths are only ~0.7-1.0 units — reading as small twigs at
 ## 0.8-1.4x scale, per real feedback. Bumped to give a real fallen-log
 ## presence (proportionally smaller than the tree scale-up, since a log
@@ -266,6 +318,16 @@ var _platform_points: Array[Vector3] = []
 var _terrain: ArenaTerrain
 var _rng := RandomNumberGenerator.new()
 
+## Deliberately a sibling of NavRegion, not a child of it (unlike
+## obstacles_root/terrain_root) — NavRegion's navmesh bake parses everything
+## under it via geometry_source_geometry_mode=ROOT_NODE_CHILDREN, and islands
+## must stay off the navmesh entirely (player-only traversal for this first
+## pass; bots have no way to jump across the gap anyway). Created lazily on
+## first generate_arena() call since it has no pre-authored node in the
+## .tscn, then reused/cleared on every subsequent regen the same way
+## obstacles_root/terrain_root already are.
+var _islands_root: Node3D
+
 
 ## Every peer must produce byte-for-byte the same arena from the same
 ## seed_value — the server generates a fresh seed once per match/restart and
@@ -287,6 +349,14 @@ func generate_arena(seed_value: int) -> void:
 	for child in terrain_root.get_children():
 		terrain_root.remove_child(child)
 		child.free()
+	if _islands_root == null:
+		_islands_root = Node3D.new()
+		_islands_root.name = "Islands"
+		add_child(_islands_root)
+	else:
+		for child in _islands_root.get_children():
+			_islands_root.remove_child(child)
+			child.free()
 	_placed.clear()
 	_platform_points.clear()
 
@@ -304,19 +374,27 @@ func generate_arena(seed_value: int) -> void:
 	# heightmap shift again after an obstacle already read its Y from it,
 	# leaving that obstacle floating/sunken relative to the real terrain.
 	_terrain.clamp_slopes()
-	# Must run right after clamp_slopes(), before anything else samples or
-	# further modifies the heightmap — see build_boundary_ridge()'s own doc
-	# comment for why this ordering is load-bearing (clamp_slopes() must
-	# never run again afterward, or it would flatten the ridge back down to
-	# something climbable). Replaces the old invisible perimeter walls: this
-	# is now the only thing containing players within the map.
-	_terrain.build_boundary_ridge()
+	# No boundary ridge call here by request: the whole perimeter is now an
+	# open cliff edge, same as the island gap that used to be the one
+	# deliberate exception carved into it (see ISLAND_GAP_CENTER_DEG's old
+	# doc comment) — a player can walk off any edge of the map and either
+	# find a floating island below or fall to a void death
+	# (Constants.VOID_KILL_Y), instead of hitting an unclimbable wall.
+	# build_boundary_ridge() itself is left intact in ArenaTerrain.gd in case
+	# a contained/no-fall-off mode is wanted again later.
 	# Obstacles sample/flatten the heightmap as they place themselves —
 	# the mesh+collision are only built afterward, from the final
 	# (obstacle-flattened) heights, so platforms sit flush instead of
 	# clipping into or floating above sloped ground.
 	_generate_obstacles()
 	_build_terrain_body()
+
+	# Fixed world-space geometry, independent of the terrain heightmap —
+	# ordering relative to the terrain build above doesn't matter, kept
+	# after it purely for readability (terrain finishes, then the floating
+	# extras get added on top).
+	_generate_islands()
+	_build_cloud_layer()
 
 	nav_region.bake_navigation_mesh(false)
 
@@ -345,6 +423,224 @@ func _build_terrain_body() -> void:
 ## real terrain — this is the shared entry point every placer samples.
 func _get_terrain_height(x: float, z: float) -> float:
 	return _terrain.get_height(x, z) if _terrain else 0.0
+
+
+## Hand-placed, not procedural — a near/far island pair off each of the 4 map
+## edges (see ISLAND_PAIR_DIRECTIONS/_build_island_pair()), plus one fixed
+## background island far outside jumping range entirely, on the opposite
+## side of the map from the +X pair — pure background set-dressing, matching
+## the distant structures visible in the reference image that were never
+## meant to be reached.
+func _generate_islands() -> void:
+	for direction in ISLAND_PAIR_DIRECTIONS:
+		_build_island_pair(direction)
+
+	var island3_top := _build_island(
+		Vector3(0.0, 20.0, -260.0), Vector2(30.0, 26.0), Vector2(36.0, 31.0), 14.0
+	)
+	_scatter_island_foliage(island3_top, Vector2(30.0, 26.0), 4)
+
+
+## Builds one near+far island pair jumping-distance past the map edge in
+## `direction` (an axis-aligned unit vector — see ISLAND_PAIR_DIRECTIONS).
+## `direction` has exactly one nonzero component, so scaling it by an offset
+## and adding a separate Y lands the pair's center on the correct edge
+## without needing per-axis-direction special-casing.
+func _build_island_pair(direction: Vector3) -> void:
+	var near_center := direction * (ArenaTerrain.HALF_EXTENT + ISLAND_NEAR_OFFSET) + Vector3(0, ISLAND_NEAR_Y, 0)
+	var near_top := _build_island(near_center, ISLAND_NEAR_TOP_SIZE, ISLAND_NEAR_BOTTOM_SIZE, ISLAND_NEAR_HEIGHT)
+	_scatter_island_foliage(near_top, ISLAND_NEAR_TOP_SIZE, 3)
+
+	var far_center := direction * (ArenaTerrain.HALF_EXTENT + ISLAND_FAR_OFFSET) + Vector3(0, ISLAND_FAR_Y, 0)
+	var far_top := _build_island(far_center, ISLAND_FAR_TOP_SIZE, ISLAND_FAR_BOTTOM_SIZE, ISLAND_FAR_HEIGHT)
+	_scatter_island_foliage(far_top, ISLAND_FAR_TOP_SIZE, 3)
+
+
+## Builds one floating island as a straight-sided prism (equal top/bottom
+## footprint, like a chunk of rock torn out of the ground) — a StaticBody3D
+## with a ConvexPolygonShape3D collider sharing the exact same vertices as
+## the visual mesh, since the shape is convex and doesn't need the
+## HeightMapShape3D/mesh-parity dance ArenaTerrain uses for its much more
+## irregular surface. `center` is the island's volumetric center, not its
+## top — returns the world-space top-surface center so callers (foliage
+## scatter, island-to-island distance tuning) don't have to redo the
+## height/2 math.
+##
+## `bottom_size` must never be smaller than `top_size` — a narrower bottom
+## creates an overhang, and a player jumping up from underneath could wedge
+## into the pocket formed by that overhang's underside, getting stuck
+## looking at the ceiling with no way out (real bug report, screenshot
+## showed the player's camera stuck against the slanted underside). Every
+## caller below tapers the safe direction instead — bottom wider than top,
+## a mountain-shaped spire with no overhang — which is also why the two
+## sizes stay independent params rather than collapsing to one Vector2.
+func _build_island(center: Vector3, top_size: Vector2, bottom_size: Vector2, height: float) -> Vector3:
+	var points := _tapered_island_points(top_size, bottom_size, height)
+
+	var body := StaticBody3D.new()
+	_islands_root.add_child(body)
+	body.global_transform.origin = center
+
+	var collision := CollisionShape3D.new()
+	var shape := ConvexPolygonShape3D.new()
+	shape.points = points
+	collision.shape = shape
+	body.add_child(collision)
+
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = _build_tapered_island_mesh(points)
+	mesh_instance.material_override = _structural_material(ISLAND_ROCK_TINT)
+	body.add_child(mesh_instance)
+
+	_add_island_grass_cap(body, top_size, height)
+
+	return center + Vector3(0.0, height * 0.5, 0.0)
+
+
+## A thin green cap sitting just above the rock body's own top face — a
+## separate plane (not a top-face color change on the rock mesh itself) so
+## the rock body can stay one single untinted material shared by every
+## face/every island, same as before. Tiny Y offset (ISLAND_GRASS_CAP_OFFSET)
+## avoids z-fighting against the rock mesh's own coplanar top face; visual
+## only, no collision — the rock body's existing convex shape already covers
+## the top surface.
+func _add_island_grass_cap(body: StaticBody3D, top_size: Vector2, height: float) -> void:
+	var cap := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = top_size
+	cap.mesh = plane
+	cap.position = Vector3(0.0, height * 0.5 + ISLAND_GRASS_CAP_OFFSET, 0.0)
+	cap.material_override = _structural_material(ISLAND_GRASS_TINT)
+	body.add_child(cap)
+
+
+## The 8 corners of the frustum, local to the island's own origin (which
+## sits at the volumetric center, y spanning -height/2..height/2) — shared
+## between the collider (as-is) and the mesh builder (assembled into faces).
+func _tapered_island_points(top_size: Vector2, bottom_size: Vector2, height: float) -> PackedVector3Array:
+	var tw := top_size.x * 0.5
+	var td := top_size.y * 0.5
+	var bw := bottom_size.x * 0.5
+	var bd := bottom_size.y * 0.5
+	var h := height * 0.5
+	return PackedVector3Array([
+		Vector3(tw, h, td), Vector3(tw, h, -td), Vector3(-tw, h, -td), Vector3(-tw, h, td),
+		Vector3(bw, -h, bd), Vector3(bw, -h, -bd), Vector3(-bw, -h, -bd), Vector3(-bw, -h, bd),
+	])
+
+
+func _build_tapered_island_mesh(p: PackedVector3Array) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Top, bottom, then the 4 side faces — each a quad split into 2
+	# triangles, wound so normals face outward (generate_normals() below
+	# then derives correct lighting from that winding).
+	_add_quad(st, p[0], p[1], p[2], p[3])  # top
+	_add_quad(st, p[7], p[6], p[5], p[4])  # bottom (reversed winding)
+	_add_quad(st, p[1], p[0], p[4], p[5])  # +X side
+	_add_quad(st, p[2], p[1], p[5], p[6])  # -Z side
+	_add_quad(st, p[3], p[2], p[6], p[7])  # -X side
+	_add_quad(st, p[0], p[3], p[7], p[4])  # +Z side
+	st.generate_normals()
+	return st.commit()
+
+
+func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+	st.add_vertex(a)
+	st.add_vertex(b)
+	st.add_vertex(c)
+	st.add_vertex(a)
+	st.add_vertex(c)
+	st.add_vertex(d)
+
+
+## Scatters a couple of trees/rocks across an island's top footprint — same
+## look as _place_tree_cluster()/_place_rock() but sampling a fixed island
+## top height instead of _get_terrain_height(), since islands aren't part
+## of the terrain heightmap. Deliberately skips _placed/overlap bookkeeping
+## (that system exists to keep terrain obstacles from overlapping each
+## other across the whole arena; islands are small, isolated, hand-placed
+## footprints with nothing else competing for the space).
+func _scatter_island_foliage(top_center: Vector3, top_size: Vector2, prop_count: int) -> void:
+	var margin := 1.5
+	for i in range(prop_count):
+		var local_x := _rng.randf_range(-top_size.x * 0.5 + margin, top_size.x * 0.5 - margin)
+		var local_z := _rng.randf_range(-top_size.y * 0.5 + margin, top_size.y * 0.5 - margin)
+		var pos := top_center + Vector3(local_x, 0.0, local_z)
+		var yaw := _rng.randf_range(0.0, TAU)
+
+		var use_rock := _rng.randf() < 0.3
+		var scene: PackedScene = ROCK_SCENES[_rng.randi() % ROCK_SCENES.size()] if use_rock else TREE_SCENES[_rng.randi() % TREE_SCENES.size()]
+
+		var body := StaticBody3D.new()
+		_islands_root.add_child(body)
+		body.global_transform = Transform3D(Basis(Vector3.UP, yaw), pos)
+
+		var collision := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = TREE_TRUNK_SIZE if not use_rock else ROCK_COLLISION_SIZES[0]
+		collision.shape = shape
+		body.add_child(collision)
+
+		body.add_child(scene.instantiate())
+
+
+## Real parallax depth (not just the sky dome, which renders at infinite
+## distance and can't provide any) — several big flat planes at different
+## heights/scales/speeds/tints, each using CLOUD_LAYER_SHADER to drift its
+## own per-pixel cloud noise via the TIME uniform, so unlike the old static
+## per-vertex-color version these actually move, and nearer/farther layers
+## visibly shift against each other as the player moves. No collision;
+## purely decorative, all sitting well below the islands.
+const CLOUD_LAYER_SHADER := preload("res://assets/shaders/cloud_layer.gdshader")
+
+## One entry per drifting layer: y (height), extent (plane half-size),
+## noise_scale (bigger = smaller/more numerous puffs — kept low here for
+## big, dense, reference-image-sized cloud masses), coverage, opacity,
+## wind_speed (world units/sec, slow — real clouds drift, they don't race),
+## tint, shadow_tint. Nearer/lower layers are whiter/faster; farther/lower
+## layers are hazier/bluer/slower, for a simple atmospheric-perspective cue
+## (matches ArenaTerrain/sky's own "cheap approximation over true
+## volumetrics" tradeoff).
+const CLOUD_LAYERS := [
+	{
+		"y": -15.0, "extent": 180.0, "noise_scale": 0.0055, "coverage": 0.7,
+		"opacity": 0.7, "wind_speed": Vector2(1.5, 0.8),
+		"tint": Color(1.0, 1.0, 0.98), "shadow_tint": Color(0.78, 0.76, 0.8),
+	},
+	{
+		"y": -40.0, "extent": 260.0, "noise_scale": 0.004, "coverage": 0.62,
+		"opacity": 0.55, "wind_speed": Vector2(1.0, 0.5),
+		"tint": Color(0.92, 0.93, 0.98), "shadow_tint": Color(0.68, 0.7, 0.78),
+	},
+	{
+		"y": -80.0, "extent": 340.0, "noise_scale": 0.0028, "coverage": 0.55,
+		"opacity": 0.4, "wind_speed": Vector2(0.6, 0.3),
+		"tint": Color(0.78, 0.82, 0.92), "shadow_tint": Color(0.6, 0.65, 0.78),
+	},
+]
+
+func _build_cloud_layer() -> void:
+	for layer in CLOUD_LAYERS:
+		var extent: float = layer["extent"]
+		var mat := ShaderMaterial.new()
+		mat.shader = CLOUD_LAYER_SHADER
+		mat.set_shader_parameter("noise_scale", layer["noise_scale"])
+		mat.set_shader_parameter("coverage", layer["coverage"])
+		mat.set_shader_parameter("opacity", layer["opacity"])
+		mat.set_shader_parameter("wind_speed", layer["wind_speed"])
+		mat.set_shader_parameter("cloud_tint", layer["tint"])
+		mat.set_shader_parameter("shadow_tint", layer["shadow_tint"])
+		mat.set_shader_parameter("fade_start", extent * 0.6)
+		mat.set_shader_parameter("fade_end", extent)
+
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(extent, extent) * 2.0
+		var mesh_instance := MeshInstance3D.new()
+		mesh_instance.mesh = plane
+		mesh_instance.position = Vector3(0.0, layer["y"], 0.0)
+		mesh_instance.material_override = mat
+		_islands_root.add_child(mesh_instance)
 
 
 ## Randomized each run so every match gets a different layout — the floor,

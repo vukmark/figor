@@ -7,32 +7,22 @@ extends RefCounted
 ## fixed 1 unit/vertex with no configurable cell size, so CELL_SIZE must
 ## stay 1.0 — the mesh is built from the exact same height array so visuals
 ## and collision can never disagree.
-## 3x the original 50.0, by request ("map bigger, at least 3x") — grid
-## resolution scales with this (see width/depth below), so this also means
-## a 9x larger heightmap/mesh/navmesh bake (area scales with the square of
-## a linear dimension) — timed directly after this change, see the doc
-## comment on generate_arena() in Arena.gd for the actual measured cost.
-const HALF_EXTENT := 150.0
+## Reverted back to the original 50.0 (was briefly tripled to 150.0 for a
+## "map bigger" request) — now that players can jump out to hand-placed
+## floating islands for extra space, the main island itself goes back to
+## its original, tighter size instead of staying oversized alongside them.
+const HALF_EXTENT := 50.0
 const CELL_SIZE := 1.0
 
-## Rolling hills restored by request, now that flat-ground-only building
-## structures are disabled again (see Arena.STRUCTURE_COUNT_MIN/MAX) and
-## the arena is going for a natural/nature-kit look instead — flat ground
-## was only ever needed to give those structures a flat footprint.
-## History: briefly set to 0.0 (flat) while the structure system was
-## active; before that, first non-zero attempt used amplitude 2.5 with only
-## a soft box-blur as the slope safety net — technically real elevation,
-## but visually almost imperceptible (worst-case ~11°) at first-person eye
-## height. Bumping amplitude to fix that pushed worst-case *single-cell*
-## slope as high as ~40° on some seeds (a soft blur only reduces slopes on
-## average, it doesn't bound the worst case) — too close to
-## CharacterBody3D's ~45° floor_max_angle for comfort. Fixed properly with
-## clamp_slopes() below, an explicit iterative relaxation that
-## mathematically guarantees no adjacent grid cells ever exceed
-## MAX_SLOPE_DEGREES regardless of amplitude, which is what actually lets
-## amplitude go this high safely.
+## Flattened by request ("hills almost all around the starting map, remove
+## it") — set back to 0.0. clamp_slopes()/MAX_SLOPE_DEGREES below become
+## no-ops at this amplitude (every height is already 0, nothing to clamp),
+## but are kept intact rather than special-cased/removed, same "disable via
+## constant, keep the code" pattern used throughout Arena.gd (see e.g.
+## STRUCTURE_COUNT_MIN/MAX) — trivial to bring hills back later by bumping
+## this back up.
 const NOISE_FREQUENCY := 0.025
-const NOISE_AMPLITUDE := 12.0
+const NOISE_AMPLITUDE := 0.0
 const FRACTAL_OCTAVES := 3
 const FRACTAL_GAIN := 0.4
 
@@ -177,11 +167,21 @@ func _relax_pair(idx_a: int, idx_b: int, max_delta: float) -> bool:
 ## harsh flat plateau — RIDGE_HEIGHT dominates the interior's own
 ## NOISE_AMPLITUDE regardless, so the result reads clearly as a boundary
 ## cliff either way.
-func build_boundary_ridge() -> void:
+## `gap_center_deg`/`gap_half_width_deg` (both NAN by default = no gap) carve
+## a single angular window, measured from map center via atan2(z, x) in
+## degrees, where the ridge is skipped entirely — a deliberate, aimed
+## jump-off point toward a hand-placed floating island, rather than a hole
+## punched in at random. Left as NAN for a fully closed perimeter (today's
+## behavior) so callers that don't want a gap don't have to think about it.
+func build_boundary_ridge(gap_center_deg: float = NAN, gap_half_width_deg: float = NAN) -> void:
 	for j in range(depth):
 		for i in range(width):
 			var x := _grid_to_world_x(i)
 			var z := _grid_to_world_z(j)
+			if not is_nan(gap_center_deg):
+				var angle_deg: float = rad_to_deg(atan2(z, x))
+				if absf(angle_difference(deg_to_rad(angle_deg), deg_to_rad(gap_center_deg))) < deg_to_rad(gap_half_width_deg):
+					continue
 			var dist_to_edge: float = min(HALF_EXTENT - abs(x), HALF_EXTENT - abs(z))
 			if dist_to_edge < RIDGE_MARGIN:
 				var t: float = clamp(dist_to_edge / RIDGE_MARGIN, 0.0, 1.0)

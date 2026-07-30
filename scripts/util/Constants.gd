@@ -69,6 +69,11 @@ const KNOCKBACK_FRICTION := 6.0
 
 const RESPAWN_DELAY := 3.0
 
+## Falling below this world Y counts as a void death (fell off a floating
+## island with nothing underneath) — comfortably below the lowest island so
+## a player is unmistakably in the void, not just briefly under terrain.
+const VOID_KILL_Y := -60.0
+
 ## Match ends when either is reached first, like a classic FFA deathmatch.
 const MATCH_KILL_LIMIT := 15
 const MATCH_TIME_LIMIT := 300.0  # 30s for now, easy to bump back up later

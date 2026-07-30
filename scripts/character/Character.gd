@@ -169,6 +169,13 @@ func _physics_process(delta: float) -> void:
 	if not health.is_alive:
 		return
 
+	# Fell off a floating island into the void — take_damage's own is_alive
+	# guard makes this safe to call every frame while still falling (only
+	# the first call past 0 health actually fires `died`).
+	if global_transform.origin.y < Constants.VOID_KILL_Y:
+		health.take_damage(health.max_health, -1)
+		return
+
 	if is_on_floor():
 		_gravity_velocity = 0.0
 		if cmd.jump_pressed:

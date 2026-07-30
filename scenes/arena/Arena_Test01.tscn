@@ -1,6 +1,7 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/arena/Arena.gd" id="1"]
+[ext_resource type="Shader" path="res://assets/shaders/sky_clouds.gdshader" id="2"]
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_arena"]
 geometry_parsed_geometry_type = 1
@@ -11,29 +12,33 @@ agent_max_climb = 0.4
 cell_size = 0.25
 cell_height = 0.25
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
-sky_top_color = Color(0.2, 0.42, 0.82, 1)
-sky_horizon_color = Color(0.78, 0.82, 0.85, 1)
-sky_curve = 0.12
-ground_bottom_color = Color(0.25, 0.24, 0.22, 1)
-ground_horizon_color = Color(0.78, 0.82, 0.85, 1)
-sun_angle_max = 22.0
-sun_curve = 0.15
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_sky_clouds"]
+shader = ExtResource("2")
+shader_parameter/cloud_height = 400.0
+shader_parameter/cloud_scale = 0.0022
+shader_parameter/cloud_coverage = 0.72
+shader_parameter/cloud_wind_speed = 4.0
+shader_parameter/sky_top_color = Color(0.16, 0.24, 0.5, 1)
+shader_parameter/sky_horizon_color = Color(0.95, 0.62, 0.35, 1)
+shader_parameter/cloud_color_light = Color(1, 0.85, 0.6, 1)
+shader_parameter/cloud_color_shadow = Color(0.32, 0.3, 0.42, 1)
+shader_parameter/void_color = Color(0.22, 0.22, 0.4, 1)
 
 [sub_resource type="Sky" id="Sky_1"]
-sky_material = SubResource("ProceduralSkyMaterial_1")
+sky_material = SubResource("ShaderMaterial_sky_clouds")
 
 [sub_resource type="Environment" id="Environment_1"]
 background_mode = 2
 sky = SubResource("Sky_1")
 ambient_light_source = 3
-ambient_light_color = Color(1, 1, 1, 1)
-ambient_light_energy = 0.7
+ambient_light_color = Color(0.85, 0.72, 0.75, 1)
+ambient_light_energy = 0.6
 fog_enabled = true
-fog_light_color = Color(0.78, 0.82, 0.87, 1)
+fog_light_color = Color(0.95, 0.68, 0.5, 1)
 fog_density = 0.004
 fog_depth_begin = 60.0
-fog_sky_affect = 0.15
+fog_sky_affect = 0.35
+fog_aerial_perspective = 0.6
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")
@@ -48,34 +53,34 @@ navigation_mesh = SubResource("NavigationMesh_arena")
 [node name="SpawnPoints" type="Node3D" parent="."]
 
 [node name="SpawnPoint_P1" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 120)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 40)
 
 [node name="SpawnPoint_Bot1" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 1, 0)
 
 [node name="SpawnPoint_Bot2" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -120, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1, 0)
 
 [node name="SpawnPoint_Bot3" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -120)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -40)
 
 [node name="SpawnPoint_Bot4" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 84, 1, 84)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1, 28)
 
 [node name="SpawnPoint_Bot5" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -84, 1, 84)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1, 28)
 
 [node name="SpawnPoint_Bot6" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 84, 1, -84)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1, -28)
 
 [node name="SpawnPoint_Bot7" type="Marker3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -84, 1, -84)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1, -28)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 15, 0)
-rotation_degrees = Vector3(-32, -25, 0)
-light_color = Color(1, 0.97, 0.9, 1)
-light_energy = 1.4
+rotation_degrees = Vector3(-8, -25, 0)
+light_color = Color(1, 0.68, 0.4, 1)
+light_energy = 1.6
 shadow_enabled = true
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
