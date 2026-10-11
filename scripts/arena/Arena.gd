@@ -100,24 +100,29 @@ const SIDE_DIRECTIONS := [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(1, 0, 0),
 ## Hand-placed floating-island cluster — first pass, player-only traversal
 ## (bots never path here, see _islands_root's doc comment). No boundary
 ## ridge exists anymore (removed by request — the whole perimeter is an
-## open cliff edge now, see generate_arena()'s doc comment). By request,
-## every one of the 4 map edges (not just +X) gets its own near/far island
-## pair — see ISLAND_PAIR_DIRECTIONS and _build_island_pair() — so jumping
-## off any side of the map has somewhere to land, not just one direction.
+## open cliff edge now, see generate_arena()'s doc comment).
 ##
-## Offsets below are the map edge (ArenaTerrain.HALF_EXTENT) plus a fixed
-## jump-distance offset — kept as the edge-plus-offset the original +X pair
-## was hand-tuned with (running jump ≈8m per SPRINT_SPEED/JUMP_VELOCITY,
-## unaffected by map size) rather than scaled with the map, so the actual
-## jump feel doesn't change when HALF_EXTENT does.
-const ISLAND_PAIR_DIRECTIONS: Array[Vector3] = [
-	Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1),
-]
+## Clusters are spread at randomized angles/offsets around the map instead
+## of exactly 4 pairs on the cardinal axes (the old ISLAND_PAIR_DIRECTIONS)
+## — that read as a rigid, obviously-generated cross once you could see the
+## map from above/outside. ISLAND_CLUSTER_COUNT clusters start at evenly
+## spaced base angles (so every side of the map still has somewhere
+## reachable to jump to, not just N/E/S/W) then each gets an angular jitter
+## — random placement, not full coverage guaranteed, but never a visible
+## grid either.
+const ISLAND_CLUSTER_COUNT := 6
+const ISLAND_CLUSTER_ANGLE_JITTER_DEG := 25.0
 ## Near island: ~3m past the edge, top a few meters below ground level — a
 ## real jump-off-the-cliff drop down onto it, not a level hop (top sits at
 ## ISLAND_NEAR_Y + ISLAND_NEAR_HEIGHT/2 = -3.0, comfortably below the main
-## terrain's y=0).
-const ISLAND_NEAR_OFFSET := 10.0
+## terrain's y=0). Offset is randomized per cluster (within a range) rather
+## than one fixed distance, for the same "not an obvious grid" reason as the
+## angle jitter above — range is centered on the original hand-tuned +X
+## pair's offset (running jump ≈8m per SPRINT_SPEED/JUMP_VELOCITY, unaffected
+## by map size, so this stays a fixed range rather than scaling with
+## HALF_EXTENT).
+const ISLAND_NEAR_OFFSET_MIN := 8.0
+const ISLAND_NEAR_OFFSET_MAX := 13.0
 const ISLAND_NEAR_Y := -6.0
 const ISLAND_NEAR_HEIGHT := 6.0
 const ISLAND_NEAR_TOP_SIZE := Vector2(14.0, 12.0)
@@ -132,12 +137,22 @@ const ISLAND_NEAR_BOTTOM_SIZE := Vector2(18.0, 15.0)
 ## ISLAND_FAR_Y + ISLAND_FAR_HEIGHT/2 = -7.0, a further 4m below the near
 ## island's top), reachable as a forward jump-and-drop from the near
 ## island's far edge, not directly from the main terrain — "another
-## floating island visible below" from the edge.
-const ISLAND_FAR_OFFSET := 32.0
+## floating island visible below" from the edge. Offset randomized the same
+## way as the near island's.
+const ISLAND_FAR_OFFSET_MIN := 26.0
+const ISLAND_FAR_OFFSET_MAX := 38.0
 const ISLAND_FAR_Y := -12.0
 const ISLAND_FAR_HEIGHT := 10.0
 const ISLAND_FAR_TOP_SIZE := Vector2(16.0, 14.0)
 const ISLAND_FAR_BOTTOM_SIZE := Vector2(20.0, 17.0)
+
+## Ramp back up from the near island to the main map's edge — until now
+## islands were one-way (jump down, no way back except a full respawn), by
+## request. Same box-ramp primitive _build_ramp() already uses for
+## structure platforms; a rise of ~3 (island top at y=-3) over a run of
+## ISLAND_NEAR_OFFSET_MIN..MAX (8-13) is a gentle ~15-20° slope, comfortably
+## walkable at a jog with no jump needed.
+const ISLAND_RETURN_RAMP_WIDTH := 3.0
 
 ## Tint reused across every island for visual consistency with each other
 ## (distinct from ArenaTerrain's own vertex-color gradient, but in the same
@@ -145,14 +160,132 @@ const ISLAND_FAR_BOTTOM_SIZE := Vector2(20.0, 17.0)
 ## combines with a noise texture.
 const ISLAND_ROCK_TINT := Color(0.4, 0.37, 0.33, 1.0)
 
-## Thin green cap on every island's top face — by request, a bare-rock
-## island top ("Selection_023.png") didn't read like the grassy main
-## terrain at all. Matches ArenaTerrain.COLOR_MID (mossy green) for visual
-## continuity between the main terrain and the islands. See
-## _add_island_grass_cap() for why this is a separate plane rather than a
-## top-face color change on the rock mesh itself.
-const ISLAND_GRASS_TINT := Color(0.32, 0.42, 0.18, 1.0)
+## Thin cap on every island's top face — by request, a bare-rock island top
+## ("Selection_023.png") didn't read like the main terrain at all. No longer
+## a fixed constant: ArenaTerrain now rolls one of several biome palettes
+## per match (see ArenaTerrain.BIOME_PALETTES), so this reads
+## `_terrain.color_mid` at generation time instead, keeping the islands
+## visually consistent with whatever biome that seed actually rolled rather
+## than always being mossy green. See _add_island_grass_cap() for why this
+## is a separate plane rather than a top-face color change on the rock mesh
+## itself.
 const ISLAND_GRASS_CAP_OFFSET := 0.02
+
+## Islands are irregular N-sided prisms, not rectangular frustums — random
+## side count per island (see _island_ring_points()) plus per-vertex
+## angle/radius jitter (ISLAND_RADIUS_JITTER) so the top/bottom silhouettes
+## read as torn rock chunks instead of a perfect box or an obvious regular
+## polygon. Each bottom-ring vertex reuses its corresponding top-ring
+## vertex's angle jitter (see _island_ring_jitter()) rather than an
+## independent random direction, plus its own depth variation (some "legs"
+## hang lower than others), since the underside is visual-only — seen from
+## below/the side but never walked on.
+##
+## That correlation matters for more than looks: an *independent* jitter
+## direction at the bottom (tried first, back when islands were simple
+## 4-corner frustums) could twist a side face into a non-planar "saddle" —
+## the fixed-diagonal triangulation then triangulates it inconsistently, one
+## triangle's winding effectively flipping, which rendered as a see-through
+## hole from outside on a single-sided material (real bug, screenshot
+## "transparent_island.png" — collision, a convex hull, had no such issue,
+## so the player could stand in a spot that looked like open sky). Keeping
+## top/bottom angle jitter correlated per vertex means a corner's vertical
+## "pillar" stays a straight line — only Y varies along it — which keeps
+## side faces planar-enough that this can't recur. _build_island() also
+## disables backface culling on the rock material as a second, independent
+## safety net against the same failure mode.
+const ISLAND_SIDE_COUNT_MIN := 6
+const ISLAND_SIDE_COUNT_MAX := 9
+const ISLAND_RADIUS_JITTER := 0.22
+const ISLAND_BOTTOM_Y_JITTER := 1.2
+
+## Rock-face tonal variation baked as per-vertex color, multiplied into
+## _structural_material's albedo (see its use_vertex_color param) so the
+## rock body reads as weathered stone instead of one flat-shaded solid —
+## clean rock tint on sunlit/noise-picked high spots, mossy-dark tint toward
+## the underside and in noise-picked crevices.
+const ISLAND_ROCK_CLEAN_TINT := Color(1.0, 1.0, 1.0)
+const ISLAND_ROCK_MOSS_TINT := Color(0.55, 0.62, 0.48)
+const ISLAND_ROCK_NOISE_FREQUENCY := 0.06
+
+## Small plant clutter scattered right at (and slightly past) the top rim,
+## spilling over the edge like moss/vines overhanging a real cliff — unlike
+## _scatter_island_foliage's main pass, which insets everything away from
+## the edge to keep the walkable footprint clear of clutter.
+const ISLAND_RIM_CLUTTER_COUNT := 3
+const ISLAND_RIM_OVERHANG := 0.6
+
+## Cheap ("procedural primitives, not modeled assets" — no sci-fi kit exists
+## in this project's Kenney assets, only nature/characters/weapons) first
+## pass at "the main map is a landed/derelict mothership, the islands are
+## the native planet's rock": metallic, part-emissive struts jutting out and
+## down from the map's open cliff edge, walkable like the ramps/platforms
+## elsewhere in this file. Visible from the islands below, same vantage
+## _build_terrain_body()'s double-sided-material fix was needed for — the
+## underside now actually has hull structure to look up at, not just a bare
+## cliff. A later, more expensive pass could replace the flat metal/emission
+## tint with a real hull-plating shader (panel seams, animated glow) on this
+## same geometry — a material swap on these meshes, not a geometry rewrite.
+const HULL_STRUT_COUNT := 8
+const HULL_STRUT_ANGLE_JITTER_DEG := 12.0
+const HULL_STRUT_LENGTH := 14.0
+const HULL_STRUT_SIZE := Vector2(2.2, 1.4)
+const HULL_STRUT_DROP := 6.0
+const HULL_METAL_TINT := Color(0.32, 0.34, 0.37, 1.0)
+const HULL_EMISSION_COLOR := Color(0.25, 0.85, 0.95, 1.0)
+const HULL_EMISSION_ENERGY := 1.8
+
+## Life-support set dressing on the main map itself — "a generation ship
+## sustaining life across the galaxy," not just a bare hull. Greenhouse
+## domes and coolant tanks are the first pair (solar arrays/comms mast are a
+## separate follow-up); both go through the same _find_valid_position/
+## _placed bookkeeping every other terrain obstacle uses, so they respect
+## spawn distance and don't overlap crates/structures/trees/each other.
+##
+## The dome itself has no collision — a hollow shell that blocks bodies but
+## not bullets/sightlines correctly needs real interior/exterior geometry,
+## well past this pass's scope — it's decoration a player can walk through,
+## same trade-off _scatter_island_rim_clutter's plants already accept.
+## Godot's built-in SphereMesh(is_hemisphere) needs no modeled asset.
+const GREENHOUSE_COUNT := 3
+const GREENHOUSE_RADIUS := 7.0
+const GREENHOUSE_GLASS_TINT := Color(0.55, 0.85, 0.8, 0.35)
+const GREENHOUSE_PLANT_COUNT := 10
+
+## Coolant/water tanks: solid metallic cylinders (CylinderMesh/
+## CylinderShape3D, also no modeled asset needed) with an emissive gauge
+## band reusing _hull_material() — unlike the greenhouse dome, these are
+## real obstacles (collidable, cover), same footprint role as crates/rocks.
+const TANK_COUNT := 4
+const TANK_RADIUS := 1.6
+const TANK_HEIGHT := 4.0
+const TANK_METAL_TINT := Color(0.75, 0.76, 0.78, 1.0)
+const TANK_GAUGE_COLOR := Color(0.3, 0.9, 0.5, 1.0)
+
+## Solar panel arrays: small grids of tilted dark panels on short posts —
+## the ship's power source, an obvious man-made grid pattern visible from a
+## distance. Every panel in one array shares a yaw (see _place_solar_array())
+## so the whole cluster reads as one installation facing one direction, not
+## a scatter of random panels.
+const SOLAR_ARRAY_COUNT := 3
+const SOLAR_PANEL_ROWS := 2
+const SOLAR_PANEL_COLS := 3
+const SOLAR_PANEL_SIZE := Vector3(1.8, 0.08, 1.2)
+const SOLAR_PANEL_SPACING := 2.2
+const SOLAR_PANEL_TILT_DEG := 35.0
+const SOLAR_POST_HEIGHT := 1.4
+const SOLAR_PANEL_TINT := Color(0.08, 0.1, 0.18, 1.0)
+const SOLAR_PANEL_GRIDLINE_COLOR := Color(0.3, 0.55, 0.95, 1.0)
+
+## Comms mast: a tall thin strut with a shallow dish and a blinking beacon
+## at the tip — "contact with the rest of the galaxy." Dish is visual-only
+## (see _place_comms_mast()'s doc comment); beacon is an emissive mesh, not
+## a real Light3D — not worth a realtime light per mast at this scale.
+const COMMS_MAST_COUNT := 2
+const COMMS_MAST_HEIGHT := 9.0
+const COMMS_MAST_RADIUS := 0.25
+const COMMS_DISH_RADIUS := 1.6
+const COMMS_BEACON_COLOR := Color(0.95, 0.25, 0.25, 1.0)
 
 ## Small walled compounds assembled from the Kenney modular wall kit, snapped
 ## to its native 1-unit grid — an intentional structure (real corners/
@@ -315,8 +448,17 @@ var _placed: Array[Dictionary] = []
 ## so rarely that the feature would barely ever get used in a normal match.
 var _platform_points: Array[Vector3] = []
 
+## Rolled once per match (see generate_arena()) and applied to every natural
+## prop count below (trees/rocks/stumps/logs/plant clusters) — by request,
+## alongside terrain amplitude and biome tint, so density varies seed to
+## seed too, instead of every match landing in the same narrow COUNT_MIN..MAX
+## band regardless of seed.
+const PROP_DENSITY_MULT_MIN := 0.6
+const PROP_DENSITY_MULT_MAX := 1.6
+
 var _terrain: ArenaTerrain
 var _rng := RandomNumberGenerator.new()
+var _prop_density_mult: float = 1.0
 
 ## Deliberately a sibling of NavRegion, not a child of it (unlike
 ## obstacles_root/terrain_root) — NavRegion's navmesh bake parses everything
@@ -343,6 +485,13 @@ var _islands_root: Node3D
 ## the server does.
 func generate_arena(seed_value: int) -> void:
 	_rng.seed = seed_value
+	# Separate RNG, offset +5 (distinct from ArenaTerrain's own +1/+2 offsets
+	# of this same seed_value), purely for the density roll below — kept off
+	# _rng itself so this doesn't reorder _rng's existing, already-verified
+	# draw sequence for prop placement.
+	var density_rng := RandomNumberGenerator.new()
+	density_rng.seed = seed_value + 5
+	_prop_density_mult = density_rng.randf_range(PROP_DENSITY_MULT_MIN, PROP_DENSITY_MULT_MAX)
 	for child in obstacles_root.get_children():
 		obstacles_root.remove_child(child)
 		child.free()
@@ -394,6 +543,7 @@ func generate_arena(seed_value: int) -> void:
 	# after it purely for readability (terrain finishes, then the floating
 	# extras get added on top).
 	_generate_islands()
+	_build_mothership_hull()
 	_build_cloud_layer()
 
 	nav_region.bake_navigation_mesh(false)
@@ -415,6 +565,16 @@ func _build_terrain_body() -> void:
 	# approach like triplanar wasn't actually correct here) — this just
 	# tells the material to use it instead of a flat albedo_color.
 	mat.vertex_color_use_as_albedo = true
+	# build_mesh() only emits a top surface (a heightfield has no "underside"
+	# geometry), so with the default single-sided culling the map is
+	# genuinely invisible from any island positioned below/outside its edge
+	# — exactly the vantage point every jump-off island creates (real bug,
+	# screenshot "from_bellow_island.png": props on the map stayed visible,
+	# since they're separate meshes, while the ground under them vanished).
+	# Double-siding the material draws the backface too; it'll render dark
+	# (lit from the "wrong" side of the normal), which reads as a
+	# shadowed/craggy underside rather than a hole in the world.
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh_instance.material_override = mat
 	body.add_child(mesh_instance)
 
@@ -425,46 +585,80 @@ func _get_terrain_height(x: float, z: float) -> float:
 	return _terrain.get_height(x, z) if _terrain else 0.0
 
 
-## Hand-placed, not procedural — a near/far island pair off each of the 4 map
-## edges (see ISLAND_PAIR_DIRECTIONS/_build_island_pair()), plus one fixed
-## background island far outside jumping range entirely, on the opposite
-## side of the map from the +X pair — pure background set-dressing, matching
-## the distant structures visible in the reference image that were never
-## meant to be reached.
+## Hand-placed, not procedural — ISLAND_CLUSTER_COUNT near/far island pairs
+## at randomized angles/offsets around the map (see _build_island_pair()),
+## plus one fixed background island far outside jumping range entirely —
+## pure background set-dressing, matching the distant structures visible in
+## the reference image that were never meant to be reached.
 func _generate_islands() -> void:
-	for direction in ISLAND_PAIR_DIRECTIONS:
+	var base_step := 360.0 / ISLAND_CLUSTER_COUNT
+	for i in range(ISLAND_CLUSTER_COUNT):
+		var angle_deg: float = i * base_step + _rng.randf_range(-ISLAND_CLUSTER_ANGLE_JITTER_DEG, ISLAND_CLUSTER_ANGLE_JITTER_DEG)
+		var direction := Vector3(cos(deg_to_rad(angle_deg)), 0.0, sin(deg_to_rad(angle_deg)))
 		_build_island_pair(direction)
 
-	var island3_top := _build_island(
+	var island3 := _build_island(
 		Vector3(0.0, 20.0, -260.0), Vector2(30.0, 26.0), Vector2(36.0, 31.0), 14.0
 	)
-	_scatter_island_foliage(island3_top, Vector2(30.0, 26.0), 4)
+	_scatter_island_foliage(island3.top_center, island3.top_points, 4)
+	_scatter_island_rim_clutter(island3.top_center, island3.top_points)
+
+
+## Exact distance from the map's center to its square edge along an
+## arbitrary (not necessarily axis-aligned) unit `direction` — a plain
+## `HALF_EXTENT * direction` multiply (fine for the old axis-aligned-only
+## directions) lands *inside* the square for a diagonal direction, since the
+## square's edge is further away along a diagonal than along an axis.
+## Chebyshev distance: the ray exits the square as soon as either axis
+## coordinate reaches HALF_EXTENT, whichever comes first.
+func _island_edge_distance(direction: Vector3) -> float:
+	return ArenaTerrain.HALF_EXTENT / max(absf(direction.x), absf(direction.z))
 
 
 ## Builds one near+far island pair jumping-distance past the map edge in
-## `direction` (an axis-aligned unit vector — see ISLAND_PAIR_DIRECTIONS).
-## `direction` has exactly one nonzero component, so scaling it by an offset
-## and adding a separate Y lands the pair's center on the correct edge
-## without needing per-axis-direction special-casing.
+## `direction` (now an arbitrary unit vector — see ISLAND_CLUSTER_COUNT's
+## doc comment). Also builds a walkable ramp from the near island's edge
+## back up to the map so islands aren't a one-way trip.
 func _build_island_pair(direction: Vector3) -> void:
-	var near_center := direction * (ArenaTerrain.HALF_EXTENT + ISLAND_NEAR_OFFSET) + Vector3(0, ISLAND_NEAR_Y, 0)
-	var near_top := _build_island(near_center, ISLAND_NEAR_TOP_SIZE, ISLAND_NEAR_BOTTOM_SIZE, ISLAND_NEAR_HEIGHT)
-	_scatter_island_foliage(near_top, ISLAND_NEAR_TOP_SIZE, 3)
+	var edge_dist := _island_edge_distance(direction)
 
-	var far_center := direction * (ArenaTerrain.HALF_EXTENT + ISLAND_FAR_OFFSET) + Vector3(0, ISLAND_FAR_Y, 0)
-	var far_top := _build_island(far_center, ISLAND_FAR_TOP_SIZE, ISLAND_FAR_BOTTOM_SIZE, ISLAND_FAR_HEIGHT)
-	_scatter_island_foliage(far_top, ISLAND_FAR_TOP_SIZE, 3)
+	var near_offset := _rng.randf_range(ISLAND_NEAR_OFFSET_MIN, ISLAND_NEAR_OFFSET_MAX)
+	var near_center := direction * (edge_dist + near_offset) + Vector3(0, ISLAND_NEAR_Y, 0)
+	var near := _build_island(near_center, ISLAND_NEAR_TOP_SIZE, ISLAND_NEAR_BOTTOM_SIZE, ISLAND_NEAR_HEIGHT)
+	_scatter_island_foliage(near.top_center, near.top_points, 3)
+	_scatter_island_rim_clutter(near.top_center, near.top_points)
+	_build_island_return_ramp(direction, edge_dist, near.top_center)
+
+	var far_offset := _rng.randf_range(ISLAND_FAR_OFFSET_MIN, ISLAND_FAR_OFFSET_MAX)
+	var far_center := direction * (edge_dist + far_offset) + Vector3(0, ISLAND_FAR_Y, 0)
+	var far := _build_island(far_center, ISLAND_FAR_TOP_SIZE, ISLAND_FAR_BOTTOM_SIZE, ISLAND_FAR_HEIGHT)
+	_scatter_island_foliage(far.top_center, far.top_points, 3)
+	_scatter_island_rim_clutter(far.top_center, far.top_points)
 
 
-## Builds one floating island as a straight-sided prism (equal top/bottom
-## footprint, like a chunk of rock torn out of the ground) — a StaticBody3D
-## with a ConvexPolygonShape3D collider sharing the exact same vertices as
-## the visual mesh, since the shape is convex and doesn't need the
-## HeightMapShape3D/mesh-parity dance ArenaTerrain uses for its much more
-## irregular surface. `center` is the island's volumetric center, not its
-## top — returns the world-space top-surface center so callers (foliage
-## scatter, island-to-island distance tuning) don't have to redo the
-## height/2 math.
+## Walkable ramp from the near island's map-facing edge back up to the map
+## boundary itself, so a player who jumped down isn't stuck relying on a
+## respawn to get back. Parented under _islands_root (not obstacles_root),
+## same as every other island piece — keeps it off the navmesh, consistent
+## with islands staying player-only/unreachable-by-bots.
+func _build_island_return_ramp(direction: Vector3, edge_dist: float, near_top_center: Vector3) -> void:
+	var top_point := direction * edge_dist
+	top_point.y = _get_terrain_height(top_point.x, top_point.z)
+	var bottom_point := near_top_center - direction * (ISLAND_NEAR_TOP_SIZE.length() * 0.25)
+	_build_ramp(top_point, bottom_point, _islands_root, ISLAND_RETURN_RAMP_WIDTH)
+
+
+## Builds one floating island as an irregular N-sided prism (a chunk of rock
+## torn out of the ground, not a clean box/frustum — see ISLAND_SIDE_COUNT_MIN
+## doc comment) — a StaticBody3D with a ConvexPolygonShape3D collider sharing
+## the exact same vertices as the visual mesh, since the shape is convex and
+## doesn't need the HeightMapShape3D/mesh-parity dance ArenaTerrain uses for
+## its much more irregular surface. `center` is the island's volumetric
+## center, not its top. Returns a Dictionary {top_center, top_points} rather
+## than a bare Vector3 — callers (foliage/rim scatter, the return ramp) need
+## both the world-space top-surface center *and* the actual jittered top
+## polygon, since it's no longer a simple rectangle they can re-derive from
+## a Vector2 size.
 ##
 ## `bottom_size` must never be smaller than `top_size` — a narrower bottom
 ## creates an overhang, and a player jumping up from underneath could wedge
@@ -474,8 +668,18 @@ func _build_island_pair(direction: Vector3) -> void:
 ## caller below tapers the safe direction instead — bottom wider than top,
 ## a mountain-shaped spire with no overhang — which is also why the two
 ## sizes stay independent params rather than collapsing to one Vector2.
-func _build_island(center: Vector3, top_size: Vector2, bottom_size: Vector2, height: float) -> Vector3:
-	var points := _tapered_island_points(top_size, bottom_size, height)
+func _build_island(center: Vector3, top_size: Vector2, bottom_size: Vector2, height: float) -> Dictionary:
+	var side_count := _rng.randi_range(ISLAND_SIDE_COUNT_MIN, ISLAND_SIDE_COUNT_MAX)
+	var ring_jitter := _island_ring_jitter(side_count)
+	var h := height * 0.5
+	var top_pts := _island_ring_points(top_size.x * 0.5, top_size.y * 0.5, side_count, ring_jitter, h)
+	var bottom_pts := _island_ring_points(bottom_size.x * 0.5, bottom_size.y * 0.5, side_count, ring_jitter, -h)
+	for i in range(side_count):
+		bottom_pts[i].y -= _rng.randf_range(0.0, ISLAND_BOTTOM_Y_JITTER)
+
+	var points: PackedVector3Array = PackedVector3Array()
+	points.append_array(top_pts)
+	points.append_array(bottom_pts)
 
 	var body := StaticBody3D.new()
 	_islands_root.add_child(body)
@@ -488,70 +692,167 @@ func _build_island(center: Vector3, top_size: Vector2, bottom_size: Vector2, hei
 	body.add_child(collision)
 
 	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = _build_tapered_island_mesh(points)
-	mesh_instance.material_override = _structural_material(ISLAND_ROCK_TINT)
+	mesh_instance.mesh = _build_tapered_island_mesh(top_pts, bottom_pts, center, height)
+	var rock_material := _structural_material(ISLAND_ROCK_TINT, true)
+	# Safety net for ISLAND_SIDE_COUNT_MIN's "saddle" failure mode: even with
+	# jitter now correlated to avoid it, a double-sided material means any
+	# triangle whose winding still ends up flipped renders from the inside
+	# instead of vanishing into a see-through hole.
+	rock_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh_instance.material_override = rock_material
 	body.add_child(mesh_instance)
 
-	_add_island_grass_cap(body, top_size, height)
+	_add_island_grass_cap(body, top_pts, height)
 
-	return center + Vector3(0.0, height * 0.5, 0.0)
+	return {"top_center": center + Vector3(0.0, h, 0.0), "top_points": top_pts}
 
 
 ## A thin green cap sitting just above the rock body's own top face — a
-## separate plane (not a top-face color change on the rock mesh itself) so
+## separate mesh (not a top-face color change on the rock mesh itself) so
 ## the rock body can stay one single untinted material shared by every
-## face/every island, same as before. Tiny Y offset (ISLAND_GRASS_CAP_OFFSET)
-## avoids z-fighting against the rock mesh's own coplanar top face; visual
-## only, no collision — the rock body's existing convex shape already covers
-## the top surface.
-func _add_island_grass_cap(body: StaticBody3D, top_size: Vector2, height: float) -> void:
+## face/every island, same as before. Fan-triangulated from `top_pts` (the
+## island's own jittered top polygon) instead of a PlaneMesh rectangle, so
+## the cap matches the now-irregular rock silhouette instead of being a
+## rectangle sitting on top of a non-rectangular rock. Tiny Y offset
+## (ISLAND_GRASS_CAP_OFFSET) avoids z-fighting against the rock mesh's own
+## coplanar top face; visual only, no collision — the rock body's existing
+## convex shape already covers the top surface.
+func _add_island_grass_cap(body: StaticBody3D, top_pts: Array, height: float) -> void:
+	var y := height * 0.5 + ISLAND_GRASS_CAP_OFFSET
+	var center := Vector3(0.0, y, 0.0)
+	var count: int = top_pts.size()
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(count):
+		var a: Vector3 = top_pts[i]
+		a.y = y
+		var b: Vector3 = top_pts[(i + 1) % count]
+		b.y = y
+		st.add_vertex(center)
+		st.add_vertex(a)
+		st.add_vertex(b)
+	st.generate_normals()
+
 	var cap := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = top_size
-	cap.mesh = plane
-	cap.position = Vector3(0.0, height * 0.5 + ISLAND_GRASS_CAP_OFFSET, 0.0)
-	cap.material_override = _structural_material(ISLAND_GRASS_TINT)
+	cap.mesh = st.commit()
+	var cap_material := _structural_material(_terrain.color_mid)
+	cap_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cap.material_override = cap_material
 	body.add_child(cap)
 
 
-## The 8 corners of the frustum, local to the island's own origin (which
-## sits at the volumetric center, y spanning -height/2..height/2) — shared
-## between the collider (as-is) and the mesh builder (assembled into faces).
-func _tapered_island_points(top_size: Vector2, bottom_size: Vector2, height: float) -> PackedVector3Array:
-	var tw := top_size.x * 0.5
-	var td := top_size.y * 0.5
-	var bw := bottom_size.x * 0.5
-	var bd := bottom_size.y * 0.5
-	var h := height * 0.5
-	return PackedVector3Array([
-		Vector3(tw, h, td), Vector3(tw, h, -td), Vector3(-tw, h, -td), Vector3(-tw, h, td),
-		Vector3(bw, -h, bd), Vector3(bw, -h, -bd), Vector3(-bw, -h, -bd), Vector3(-bw, -h, bd),
-	])
+## Per-vertex angle offset + radius scale for one ring of an island's
+## silhouette, shared between that island's top and bottom rings (each
+## scaled to its own top_size/bottom_size radii by _island_ring_points) so a
+## corner's vertical "pillar" stays a straight line in XZ — see
+## ISLAND_SIDE_COUNT_MIN's doc comment for why an independent random
+## direction at the bottom isn't safe (it can twist a side face into a
+## non-planar saddle and flip a triangle's winding).
+func _island_ring_jitter(side_count: int) -> Array:
+	var jitter := []
+	for i in range(side_count):
+		jitter.append({
+			"angle": _rng.randf_range(-0.35, 0.35) * (TAU / side_count),
+			"radius_scale": 1.0 + _rng.randf_range(-ISLAND_RADIUS_JITTER, ISLAND_RADIUS_JITTER),
+		})
+	return jitter
 
 
-func _build_tapered_island_mesh(p: PackedVector3Array) -> ArrayMesh:
+## One ring (top or bottom) of an island's irregular N-sided silhouette —
+## an ellipse of radii (rx, rz) with each vertex's angle/radius perturbed by
+## `jitter` (shared with the other ring, see _island_ring_jitter's doc
+## comment). Points are generated in decreasing-angle order to match the
+## winding the original 4-corner rectangle happened to use (proven to light
+## correctly in earlier screenshots) — _build_tapered_island_mesh's fan/quad
+## winding assumes this order.
+func _island_ring_points(rx: float, rz: float, side_count: int, jitter: Array, y: float) -> Array:
+	var pts: Array = []
+	for i in range(side_count):
+		var base_angle := -TAU * float(i) / float(side_count)
+		var angle: float = base_angle + jitter[i]["angle"]
+		var radius_scale: float = jitter[i]["radius_scale"]
+		pts.append(Vector3(cos(angle) * rx * radius_scale, y, sin(angle) * rz * radius_scale))
+	return pts
+
+
+## `center`/`height` are only needed to sample _island_rock_color() per
+## vertex (world position for the noise, local Y fraction for the
+## top-clean/bottom-mossy bias) — they play no part in the geometry itself,
+## which is still built entirely from `top_pts`/`bottom_pts`.
+func _build_tapered_island_mesh(top_pts: Array, bottom_pts: Array, center: Vector3, height: float) -> ArrayMesh:
+	var count: int = top_pts.size()
+	var noise := FastNoiseLite.new()
+	# Seeded from the island's own center so every island gets a different
+	# noise pattern, but the same island is byte-identical across peers.
+	noise.seed = int(center.x * 13.0 + center.z * 7.0 + center.y * 3.0)
+	noise.frequency = ISLAND_ROCK_NOISE_FREQUENCY
+
+	var top_c: Array[Color] = []
+	var bottom_c: Array[Color] = []
+	for i in range(count):
+		top_c.append(_island_rock_color(top_pts[i], center, height, noise))
+		bottom_c.append(_island_rock_color(bottom_pts[i], center, height, noise))
+
+	var top_center := Vector3(0.0, height * 0.5, 0.0)
+	var bottom_center := Vector3(0.0, -height * 0.5, 0.0)
+	var top_center_color := _island_rock_color(top_center, center, height, noise)
+	var bottom_center_color := _island_rock_color(bottom_center, center, height, noise)
+
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# Top, bottom, then the 4 side faces — each a quad split into 2
-	# triangles, wound so normals face outward (generate_normals() below
-	# then derives correct lighting from that winding).
-	_add_quad(st, p[0], p[1], p[2], p[3])  # top
-	_add_quad(st, p[7], p[6], p[5], p[4])  # bottom (reversed winding)
-	_add_quad(st, p[1], p[0], p[4], p[5])  # +X side
-	_add_quad(st, p[2], p[1], p[5], p[6])  # -Z side
-	_add_quad(st, p[3], p[2], p[6], p[7])  # -X side
-	_add_quad(st, p[0], p[3], p[7], p[4])  # +Z side
+	for i in range(count):
+		var j := (i + 1) % count
+		# Top face: fan out from the center, same winding direction the ring
+		# points are already in. Bottom face: the reverse traversal order
+		# flips the winding so its normal faces down instead of up, same
+		# trick the old fixed-quad version used (see git history).
+		_add_tri(st, top_center, top_pts[i], top_pts[j], top_center_color, top_c[i], top_c[j])
+		_add_tri(st, bottom_center, bottom_pts[j], bottom_pts[i], bottom_center_color, bottom_c[j], bottom_c[i])
+		# Side quad between ring index i and i+1.
+		_add_quad(st, top_pts[i], top_pts[j], bottom_pts[j], bottom_pts[i], top_c[i], top_c[j], bottom_c[j], bottom_c[i])
 	st.generate_normals()
 	return st.commit()
 
 
-func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+## Moss-dark patches near the underside/in noise-picked crevices, clean rock
+## tint elsewhere — see ISLAND_ROCK_MOSS_TINT's doc comment. `local` is a
+## point relative to the island's own center (one of _island_ring_points'
+## per-ring vertices, or a top/bottom center point for the fan-triangulated
+## faces); `center + local` gives noise a stable world position so two
+## islands never read as the same texture repeated.
+func _island_rock_color(local: Vector3, center: Vector3, height: float, noise: FastNoiseLite) -> Color:
+	var world := center + local
+	var noise_t: float = clamp((noise.get_noise_3d(world.x, world.y, world.z) + 1.0) * 0.5, 0.0, 1.0)
+	var depth_t: float = clamp(-local.y / height + 0.5, 0.0, 1.0)
+	var moss_t: float = clamp(noise_t * 0.6 + depth_t * 0.5, 0.0, 1.0)
+	return ISLAND_ROCK_CLEAN_TINT.lerp(ISLAND_ROCK_MOSS_TINT, moss_t)
+
+
+func _add_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ca: Color = Color.WHITE, cb: Color = Color.WHITE, cc: Color = Color.WHITE) -> void:
+	st.set_color(ca)
 	st.add_vertex(a)
+	st.set_color(cb)
 	st.add_vertex(b)
+	st.set_color(cc)
 	st.add_vertex(c)
-	st.add_vertex(a)
-	st.add_vertex(c)
-	st.add_vertex(d)
+
+
+func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, ca: Color = Color.WHITE, cb: Color = Color.WHITE, cc: Color = Color.WHITE, cd: Color = Color.WHITE) -> void:
+	_add_tri(st, a, b, c, ca, cb, cc)
+	_add_tri(st, a, c, d, ca, cc, cd)
+
+
+## Picks a random point inside an island's top polygon by walking partway
+## from the center toward a random vertex — always inside the polygon since
+## _island_ring_points always builds a star-shaped ring around its own
+## center (every point is directly visible from the center), regardless of
+## how irregular the jitter made the silhouette. `margin_t` (0..1) keeps the
+## far end short of the actual edge, mirroring the old rectangle version's
+## fixed-distance margin.
+func _random_point_in_island_top(top_points: Array, max_t: float) -> Vector3:
+	var vertex: Vector3 = top_points[_rng.randi() % top_points.size()]
+	return vertex * _rng.randf_range(0.0, max_t)
 
 
 ## Scatters a couple of trees/rocks across an island's top footprint — same
@@ -561,12 +862,10 @@ func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) 
 ## (that system exists to keep terrain obstacles from overlapping each
 ## other across the whole arena; islands are small, isolated, hand-placed
 ## footprints with nothing else competing for the space).
-func _scatter_island_foliage(top_center: Vector3, top_size: Vector2, prop_count: int) -> void:
-	var margin := 1.5
+func _scatter_island_foliage(top_center: Vector3, top_points: Array, prop_count: int) -> void:
 	for i in range(prop_count):
-		var local_x := _rng.randf_range(-top_size.x * 0.5 + margin, top_size.x * 0.5 - margin)
-		var local_z := _rng.randf_range(-top_size.y * 0.5 + margin, top_size.y * 0.5 - margin)
-		var pos := top_center + Vector3(local_x, 0.0, local_z)
+		var local := _random_point_in_island_top(top_points, 0.75)
+		var pos := top_center + Vector3(local.x, 0.0, local.z)
 		var yaw := _rng.randf_range(0.0, TAU)
 
 		var use_rock := _rng.randf() < 0.3
@@ -583,6 +882,34 @@ func _scatter_island_foliage(top_center: Vector3, top_size: Vector2, prop_count:
 		body.add_child(collision)
 
 		body.add_child(scene.instantiate())
+
+
+## Small plant clutter right at (and slightly past) the top rim — see
+## ISLAND_RIM_CLUTTER_COUNT's doc comment for why this is a separate pass
+## from _scatter_island_foliage rather than just widening that one's
+## placement range. Picks a random point along a random edge of the actual
+## jittered top polygon (rather than the old 4-side rectangle switch) and
+## pushes it outward along that point's own radial direction, so it spills
+## past whichever edge it landed on regardless of the polygon's shape. No
+## collision (same as _place_plant_cluster's ground plants), added straight
+## to _islands_root at world position, exactly like _scatter_island_foliage's
+## props.
+func _scatter_island_rim_clutter(top_center: Vector3, top_points: Array) -> void:
+	var count: int = top_points.size()
+	for i in range(ISLAND_RIM_CLUTTER_COUNT):
+		var idx := _rng.randi() % count
+		var a: Vector3 = top_points[idx]
+		var b: Vector3 = top_points[(idx + 1) % count]
+		var edge_point: Vector3 = a.lerp(b, _rng.randf_range(0.0, 1.0))
+		var radial := Vector2(edge_point.x, edge_point.z).normalized()
+		var local := edge_point + Vector3(radial.x, 0.0, radial.y) * ISLAND_RIM_OVERHANG
+
+		var scene: PackedScene = PLANT_SCENES[_rng.randi() % PLANT_SCENES.size()]
+		var instance := scene.instantiate()
+		_islands_root.add_child(instance)
+		instance.position = top_center + Vector3(local.x, -0.3, local.z)
+		instance.rotate_y(_rng.randf_range(0.0, TAU))
+		instance.scale = Vector3.ONE * _rng.randf_range(0.8, 1.3)
 
 
 ## Real parallax depth (not just the sky dome, which renders at infinite
@@ -647,6 +974,16 @@ func _build_cloud_layer() -> void:
 ## walls, and spawn points stay fixed as the play-area boundary, but cover
 ## placement changes. Navmesh baking happens at runtime (see _ready), after
 ## these are placed, so it always reflects the layout that was just rolled.
+## Rolls a count in [min_count, max_count] via _rng (same draw as before —
+## _prop_density_mult is applied on top, not folded into the range itself,
+## so this doesn't change _rng's draw sequence/count) then scales it by the
+## match's rolled _prop_density_mult. Only used for natural/foliage props —
+## see PROP_DENSITY_MULT_MIN/MAX's doc comment.
+func _scaled_count(min_count: int, max_count: int) -> int:
+	var base_count := _rng.randi_range(min_count, max_count)
+	return maxi(0, roundi(base_count * _prop_density_mult))
+
+
 func _generate_obstacles() -> void:
 	# Structures placed first, before platforms — they're the most
 	# position-constrained (largest footprints) and the main visual
@@ -655,6 +992,37 @@ func _generate_obstacles() -> void:
 	var structure_count := _rng.randi_range(STRUCTURE_COUNT_MIN, STRUCTURE_COUNT_MAX)
 	for i in range(structure_count):
 		_place_structure()
+
+	# Tree clusters next, ahead of the life-support props below — their
+	# footprint (TREE_CLUSTER_RADIUS*2.2 ≈ 24x24) is the single largest of
+	# anything _generate_obstacles places, bigger even than a greenhouse
+	# dome's. _clears_obstacles' exclusion zone around every already-placed
+	# object scales with the *candidate's own* size, so if the smaller
+	# life-support props claimed space first, each one — even a small
+	# tank — would carve out a huge no-go zone once a tree cluster tried to
+	# fit around it, and collectively that was enough to saturate the whole
+	# map (real bug: all 8 tree clusters failed to place, every single one,
+	# confirmed via temporary instrumentation — trees only reappeared once
+	# this loop moved back ahead of the props).
+	var tree_cluster_count := _scaled_count(TREE_CLUSTER_COUNT_MIN, TREE_CLUSTER_COUNT_MAX)
+	for i in range(tree_cluster_count):
+		_place_tree_cluster()
+
+	# Life-support set dressing — same "most position-constrained gets first
+	# pick of open ground" priority as structures, see GREENHOUSE_COUNT's doc
+	# comment. Ordered by footprint size, largest first, for the same reason
+	# tree clusters now come before all of them.
+	for i in range(GREENHOUSE_COUNT):
+		_place_greenhouse()
+
+	for i in range(SOLAR_ARRAY_COUNT):
+		_place_solar_array()
+
+	for i in range(TANK_COUNT):
+		_place_tank()
+
+	for i in range(COMMS_MAST_COUNT):
+		_place_comms_mast()
 
 	var platform_count := _rng.randi_range(PLATFORM_COUNT_MIN, PLATFORM_COUNT_MAX)
 	for i in range(platform_count):
@@ -668,26 +1036,23 @@ func _generate_obstacles() -> void:
 	for i in range(column_count):
 		_place_box_obstacle(COLUMN_SCENE, COLUMN_SIZE, COLUMN_HEIGHT_OFFSET)
 
-	# Foliage last — the least gameplay-constrained layer, so it fills
-	# whatever open ground remains instead of competing with structures/
-	# platforms/crates/columns for the best clearings.
-	var tree_cluster_count := _rng.randi_range(TREE_CLUSTER_COUNT_MIN, TREE_CLUSTER_COUNT_MAX)
-	for i in range(tree_cluster_count):
-		_place_tree_cluster()
-
-	var rock_count := _rng.randi_range(ROCK_COUNT_MIN, ROCK_COUNT_MAX)
+	# Remaining foliage last — the least gameplay-constrained layer (smallest
+	# footprints, or for plant clusters no obstacle-overlap check at all —
+	# see _place_plant_cluster), so it fills whatever open ground remains
+	# instead of competing with anything above for the best clearings.
+	var rock_count := _scaled_count(ROCK_COUNT_MIN, ROCK_COUNT_MAX)
 	for i in range(rock_count):
 		_place_rock()
 
-	var stump_count := _rng.randi_range(STUMP_COUNT_MIN, STUMP_COUNT_MAX)
+	var stump_count := _scaled_count(STUMP_COUNT_MIN, STUMP_COUNT_MAX)
 	for i in range(stump_count):
 		_place_stump()
 
-	var log_count := _rng.randi_range(LOG_COUNT_MIN, LOG_COUNT_MAX)
+	var log_count := _scaled_count(LOG_COUNT_MIN, LOG_COUNT_MAX)
 	for i in range(log_count):
 		_place_log()
 
-	var plant_cluster_count := _rng.randi_range(PLANT_CLUSTER_COUNT_MIN, PLANT_CLUSTER_COUNT_MAX)
+	var plant_cluster_count := _scaled_count(PLANT_CLUSTER_COUNT_MIN, PLANT_CLUSTER_COUNT_MAX)
 	for i in range(plant_cluster_count):
 		_place_plant_cluster()
 
@@ -796,7 +1161,13 @@ func _add_structure_piece(body: StaticBody3D, scene: PackedScene, local_pos: Vec
 ## mottled speckle pattern with no directional/world-position meaning to get
 ## wrong — it looks fine from any box face. Fixed noise seed since this is a
 ## texture pattern, not gameplay RNG (must not touch the seeded _rng).
-func _structural_material(tint: Color) -> StandardMaterial3D:
+## `use_vertex_color` multiplies the mesh's own per-vertex color into the
+## final albedo alongside `tint`/the noise texture — off by default so
+## existing callers whose meshes never set vertex colors (StandardMaterial3D
+## just treats that as opaque white, a no-op) see no change; islands are the
+## only caller that turns it on, since _build_tapered_island_mesh is the
+## only mesh builder that bakes per-vertex color at all.
+func _structural_material(tint: Color, use_vertex_color: bool = false) -> StandardMaterial3D:
 	var noise := FastNoiseLite.new()
 	noise.seed = 1
 	noise.frequency = 0.6
@@ -810,6 +1181,7 @@ func _structural_material(tint: Color) -> StandardMaterial3D:
 	mat.albedo_texture = noise_tex
 	mat.uv1_triplanar = true
 	mat.uv1_scale = Vector3.ONE * 0.35
+	mat.vertex_color_use_as_albedo = use_vertex_color
 	return mat
 
 
@@ -868,7 +1240,11 @@ func _place_platform() -> void:
 	_platform_points.append(Vector3(pos.x, ground_y + PLATFORM_HEIGHT, pos.z))
 
 
-func _build_ramp(top_point: Vector3, bottom_point: Vector3) -> void:
+## `parent`/`width` default to the original structure-platform-ramp behavior
+## (obstacles_root, RAMP_WIDTH) — _build_island_return_ramp() is the only
+## caller that overrides them, to keep its ramp off the navmesh like every
+## other island piece.
+func _build_ramp(top_point: Vector3, bottom_point: Vector3, parent: Node3D = null, width: float = RAMP_WIDTH) -> void:
 	var diff := bottom_point - top_point
 	var slope_length := diff.length()
 	if slope_length < 0.01:
@@ -876,10 +1252,10 @@ func _build_ramp(top_point: Vector3, bottom_point: Vector3) -> void:
 	var mid := (top_point + bottom_point) * 0.5
 
 	var body := StaticBody3D.new()
-	obstacles_root.add_child(body)
+	(parent if parent else obstacles_root).add_child(body)
 	body.global_transform = Transform3D(_basis_looking(diff), mid)
 
-	var ramp_size := Vector3(RAMP_WIDTH, RAMP_THICKNESS, slope_length)
+	var ramp_size := Vector3(width, RAMP_THICKNESS, slope_length)
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = ramp_size
@@ -905,6 +1281,82 @@ func _basis_looking(direction: Vector3) -> Basis:
 	return Basis(x_axis, y_axis, z_axis)
 
 
+## See HULL_STRUT_COUNT's doc comment for the overall "main map as
+## mothership hull" idea. Struts are spread evenly around the map's
+## perimeter (with a little angle jitter so they don't read as a perfectly
+## regular ring) using the same _island_edge_distance() the islands use, so
+## they anchor right at the map's actual edge regardless of direction.
+func _build_mothership_hull() -> void:
+	var base_step := 360.0 / HULL_STRUT_COUNT
+	for i in range(HULL_STRUT_COUNT):
+		var angle_deg: float = i * base_step + _rng.randf_range(-HULL_STRUT_ANGLE_JITTER_DEG, HULL_STRUT_ANGLE_JITTER_DEG)
+		var direction := Vector3(cos(deg_to_rad(angle_deg)), 0.0, sin(deg_to_rad(angle_deg)))
+		_build_hull_strut(direction)
+
+
+## One strut: a metallic box jutting outward and downward from the map's
+## cliff edge in `direction`, plus a thin emissive "running light" stripe
+## along its top. Parented under _islands_root (off navmesh, same as every
+## other piece hanging off the map's edge in open air) but does have real
+## collision — unlike islands' rock, this is meant to double as a walkable
+## catwalk, not just scenery.
+func _build_hull_strut(direction: Vector3) -> void:
+	var edge_dist := _island_edge_distance(direction)
+	var base_point := direction * (edge_dist - 2.0) + Vector3(0.0, -1.0, 0.0)
+	var tip_point := direction * (edge_dist + HULL_STRUT_LENGTH) + Vector3(0.0, -1.0 - HULL_STRUT_DROP, 0.0)
+	var diff := tip_point - base_point
+	var length := diff.length()
+	if length < 0.01:
+		return
+	var mid := (base_point + tip_point) * 0.5
+
+	var body := StaticBody3D.new()
+	_islands_root.add_child(body)
+	body.global_transform = Transform3D(_basis_looking(diff), mid)
+
+	var strut_size := Vector3(HULL_STRUT_SIZE.x, HULL_STRUT_SIZE.y, length)
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = strut_size
+	collision.shape = shape
+	body.add_child(collision)
+
+	var mesh_instance := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = strut_size
+	mesh_instance.mesh = box_mesh
+	mesh_instance.material_override = _hull_material(HULL_METAL_TINT)
+	body.add_child(mesh_instance)
+
+	# Thin emissive stripe along the top face, like a running-light seam — a
+	# second, slightly-inset box rather than a UV-mapped texture (no such
+	# asset exists, and a flat emissive tint reads fine at this scale).
+	var stripe_size := Vector3(HULL_STRUT_SIZE.x * 0.15, HULL_STRUT_SIZE.y * 0.15, length * 0.9)
+	var stripe := MeshInstance3D.new()
+	var stripe_mesh := BoxMesh.new()
+	stripe_mesh.size = stripe_size
+	stripe.mesh = stripe_mesh
+	stripe.position = Vector3(0.0, HULL_STRUT_SIZE.y * 0.5, 0.0)
+	stripe.material_override = _hull_material(HULL_EMISSION_COLOR, true)
+	body.add_child(stripe)
+
+
+## Metallic hull-plating material — `emissive` swaps in a bright, unlit-ish
+## glow (used for the strut's running-light stripe) instead of the usual
+## metallic/rough surface.
+func _hull_material(tint: Color, emissive: bool = false) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = tint
+	if emissive:
+		mat.emission_enabled = true
+		mat.emission = tint
+		mat.emission_energy_multiplier = HULL_EMISSION_ENERGY
+	else:
+		mat.metallic = 0.75
+		mat.roughness = 0.35
+	return mat
+
+
 func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_offset: float) -> void:
 	var pos := _find_valid_position(box_size)
 	if not is_finite(pos.x):
@@ -923,6 +1375,243 @@ func _place_box_obstacle(model_scene: PackedScene, box_size: Vector3, height_off
 	body.add_child(model_scene.instantiate())
 
 	_placed.append({"position": body.global_transform.origin, "size": box_size})
+
+
+## Greenhouse dome — see GREENHOUSE_COUNT's doc comment for why the shell
+## has no collision. Plants scattered inside reuse _place_plant_cluster's
+## disk-sampling (area-uniform via sqrt(rand)) and its "no collision, purely
+## decorative" trade-off, just at the dome's ground footprint instead of out
+## in the open.
+func _place_greenhouse() -> void:
+	var footprint := Vector3(GREENHOUSE_RADIUS, 0, GREENHOUSE_RADIUS) * 2.2
+	var center := _find_valid_position(footprint)
+	if not is_finite(center.x):
+		return
+	var ground_y := _get_terrain_height(center.x, center.z)
+
+	var dome := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = GREENHOUSE_RADIUS
+	sphere.height = GREENHOUSE_RADIUS
+	sphere.is_hemisphere = true
+	dome.mesh = sphere
+	dome.position = Vector3(center.x, ground_y, center.z)
+	var glass := StandardMaterial3D.new()
+	glass.albedo_color = GREENHOUSE_GLASS_TINT
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.1
+	# Double-sided: with no collision a player can walk inside the dome, and
+	# should still see glass looking up/out from there, not a backface-
+	# culled hole (same reasoning as the island rock material's cull fix).
+	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+	dome.material_override = glass
+	obstacles_root.add_child(dome)
+
+	for i in range(GREENHOUSE_PLANT_COUNT):
+		var angle := _rng.randf_range(0.0, TAU)
+		var radius := (GREENHOUSE_RADIUS - 1.0) * sqrt(_rng.randf())
+		var plant_pos := center + Vector3(cos(angle), 0, sin(angle)) * radius
+
+		var scene: PackedScene = PLANT_SCENES[_rng.randi() % PLANT_SCENES.size()]
+		var scale_factor := _rng.randf_range(PLANT_SCALE_MIN, PLANT_SCALE_MAX)
+		var yaw := _rng.randf_range(0.0, TAU)
+
+		var instance := scene.instantiate()
+		instance.position = Vector3(plant_pos.x, ground_y, plant_pos.z)
+		instance.rotate_y(yaw)
+		instance.scale = Vector3.ONE * scale_factor
+		obstacles_root.add_child(instance)
+
+	_placed.append({"position": Vector3(center.x, 0, center.z), "size": footprint})
+
+
+## Coolant/water tank — see TANK_COUNT's doc comment. Reuses _hull_material()
+## for both the tank body (metallic) and its gauge band (emissive), same
+## helper the mothership hull struts use.
+func _place_tank() -> void:
+	var footprint := Vector3(TANK_RADIUS, 0, TANK_RADIUS) * 2.8
+	var pos := _find_valid_position(footprint)
+	if not is_finite(pos.x):
+		return
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	body.global_transform.origin = Vector3(pos.x, ground_y + TANK_HEIGHT * 0.5, pos.z)
+
+	var collision := CollisionShape3D.new()
+	var shape := CylinderShape3D.new()
+	shape.radius = TANK_RADIUS
+	shape.height = TANK_HEIGHT
+	collision.shape = shape
+	body.add_child(collision)
+
+	var mesh_instance := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = TANK_RADIUS
+	cylinder.bottom_radius = TANK_RADIUS
+	cylinder.height = TANK_HEIGHT
+	mesh_instance.mesh = cylinder
+	mesh_instance.material_override = _hull_material(TANK_METAL_TINT)
+	body.add_child(mesh_instance)
+
+	# Emissive gauge band — a slightly wider, very short cylinder wrapped
+	# around the tank's mid-height, same "second inset mesh" trick as the
+	# hull strut's running-light stripe.
+	var gauge := MeshInstance3D.new()
+	var gauge_mesh := CylinderMesh.new()
+	gauge_mesh.top_radius = TANK_RADIUS * 1.03
+	gauge_mesh.bottom_radius = TANK_RADIUS * 1.03
+	gauge_mesh.height = TANK_HEIGHT * 0.12
+	gauge.mesh = gauge_mesh
+	gauge.material_override = _hull_material(TANK_GAUGE_COLOR, true)
+	body.add_child(gauge)
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": footprint})
+
+
+## A grid of tilted solar panels sharing one yaw, so the whole cluster reads
+## as one installation. Only the array's own footprint goes through
+## _find_valid_position/_placed — individual panels within it are trusted
+## not to collide with anything else the way a tree cluster's individual
+## trees are.
+func _place_solar_array() -> void:
+	var array_w := (SOLAR_PANEL_COLS - 1) * SOLAR_PANEL_SPACING + SOLAR_PANEL_SIZE.x
+	var array_d := (SOLAR_PANEL_ROWS - 1) * SOLAR_PANEL_SPACING + SOLAR_PANEL_SIZE.z
+	var footprint := Vector3(array_w, 0, array_d) * 1.3
+	var center := _find_valid_position(footprint)
+	if not is_finite(center.x):
+		return
+	var ground_y := _get_terrain_height(center.x, center.z)
+	var yaw := _rng.randf_range(0.0, TAU)
+	var yaw_basis := Basis(Vector3.UP, yaw)
+
+	for row in range(SOLAR_PANEL_ROWS):
+		for col in range(SOLAR_PANEL_COLS):
+			var local := Vector3(
+				(col - (SOLAR_PANEL_COLS - 1) * 0.5) * SOLAR_PANEL_SPACING,
+				0.0,
+				(row - (SOLAR_PANEL_ROWS - 1) * 0.5) * SOLAR_PANEL_SPACING
+			)
+			var world := center + yaw_basis * local
+			_place_solar_panel(Vector3(world.x, ground_y, world.z), yaw)
+
+	_placed.append({"position": Vector3(center.x, 0, center.z), "size": footprint})
+
+
+## One panel: a post (vertical, untilted, in the body's own local space) and
+## a panel+gridline (tilted around local X, sitting atop the post) — the
+## whole body itself just carries `yaw`, so every child's local transform
+## stays simple regardless of which direction the array faces.
+func _place_solar_panel(base_pos: Vector3, yaw: float) -> void:
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	body.global_transform = Transform3D(Basis(Vector3.UP, yaw), base_pos)
+
+	var post_offset := Vector3(0.0, SOLAR_POST_HEIGHT * 0.5, 0.0)
+	var post_size := Vector3(0.2, SOLAR_POST_HEIGHT, 0.2)
+	var post_collision := CollisionShape3D.new()
+	var post_shape := BoxShape3D.new()
+	post_shape.size = post_size
+	post_collision.shape = post_shape
+	post_collision.position = post_offset
+	body.add_child(post_collision)
+
+	var post_mesh := MeshInstance3D.new()
+	var post_box := BoxMesh.new()
+	post_box.size = post_size
+	post_mesh.mesh = post_box
+	post_mesh.position = post_offset
+	post_mesh.material_override = _hull_material(HULL_METAL_TINT)
+	body.add_child(post_mesh)
+
+	var panel_transform := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-SOLAR_PANEL_TILT_DEG)), Vector3(0.0, SOLAR_POST_HEIGHT, 0.0))
+
+	var panel_collision := CollisionShape3D.new()
+	var panel_shape := BoxShape3D.new()
+	panel_shape.size = SOLAR_PANEL_SIZE
+	panel_collision.shape = panel_shape
+	panel_collision.transform = panel_transform
+	body.add_child(panel_collision)
+
+	var panel_mesh := MeshInstance3D.new()
+	var panel_box := BoxMesh.new()
+	panel_box.size = SOLAR_PANEL_SIZE
+	panel_mesh.mesh = panel_box
+	panel_mesh.transform = panel_transform
+	panel_mesh.material_override = _hull_material(SOLAR_PANEL_TINT)
+	body.add_child(panel_mesh)
+
+	# Thin emissive grid line down the panel's center — cheap stand-in for
+	# cell seams, same "second inset mesh" trick as the tank's gauge band.
+	var grid_mesh := MeshInstance3D.new()
+	var grid_box := BoxMesh.new()
+	grid_box.size = Vector3(SOLAR_PANEL_SIZE.x * 0.94, SOLAR_PANEL_SIZE.y * 0.4, SOLAR_PANEL_SIZE.z * 0.06)
+	grid_mesh.mesh = grid_box
+	grid_mesh.transform = panel_transform
+	grid_mesh.material_override = _hull_material(SOLAR_PANEL_GRIDLINE_COLOR, true)
+	body.add_child(grid_mesh)
+
+
+## Comms mast: a tall thin strut, a shallow dish partway up, and a blinking
+## beacon at the tip. The dish has no collision — it's a thin slanted disc,
+## and colliding with just its surface would feel like an invisible wall
+## around empty air at every other angle; the mast itself is the real
+## obstacle.
+func _place_comms_mast() -> void:
+	var footprint := Vector3(COMMS_DISH_RADIUS, 0, COMMS_DISH_RADIUS) * 2.5
+	var pos := _find_valid_position(footprint)
+	if not is_finite(pos.x):
+		return
+	var ground_y := _get_terrain_height(pos.x, pos.z)
+
+	var body := StaticBody3D.new()
+	obstacles_root.add_child(body)
+	body.global_transform.origin = Vector3(pos.x, ground_y, pos.z)
+
+	var mast_offset := Vector3(0.0, COMMS_MAST_HEIGHT * 0.5, 0.0)
+	var mast_collision := CollisionShape3D.new()
+	var mast_shape := CylinderShape3D.new()
+	mast_shape.radius = COMMS_MAST_RADIUS
+	mast_shape.height = COMMS_MAST_HEIGHT
+	mast_collision.shape = mast_shape
+	mast_collision.position = mast_offset
+	body.add_child(mast_collision)
+
+	var mast_mesh := MeshInstance3D.new()
+	var mast_cyl := CylinderMesh.new()
+	mast_cyl.top_radius = COMMS_MAST_RADIUS
+	mast_cyl.bottom_radius = COMMS_MAST_RADIUS * 1.4
+	mast_cyl.height = COMMS_MAST_HEIGHT
+	mast_mesh.mesh = mast_cyl
+	mast_mesh.position = mast_offset
+	mast_mesh.material_override = _hull_material(HULL_METAL_TINT)
+	body.add_child(mast_mesh)
+
+	var dish := MeshInstance3D.new()
+	var dish_mesh := SphereMesh.new()
+	dish_mesh.radius = COMMS_DISH_RADIUS
+	dish_mesh.height = COMMS_DISH_RADIUS * 0.6
+	dish_mesh.is_hemisphere = true
+	dish.mesh = dish_mesh
+	dish.scale = Vector3(1.0, 0.35, 1.0)
+	dish.position = Vector3(0.0, COMMS_MAST_HEIGHT * 0.85, 0.0)
+	dish.rotation = Vector3(deg_to_rad(60.0), 0.0, 0.0)
+	dish.material_override = _hull_material(HULL_METAL_TINT)
+	body.add_child(dish)
+
+	# Blinking beacon at the very tip — cheap stand-in for an aircraft
+	# warning light.
+	var beacon := MeshInstance3D.new()
+	var beacon_mesh := SphereMesh.new()
+	beacon_mesh.radius = 0.2
+	beacon_mesh.height = 0.4
+	beacon.mesh = beacon_mesh
+	beacon.position = Vector3(0.0, COMMS_MAST_HEIGHT, 0.0)
+	beacon.material_override = _hull_material(COMMS_BEACON_COLOR, true)
+	body.add_child(beacon)
+
+	_placed.append({"position": Vector3(pos.x, 0, pos.z), "size": footprint})
 
 
 ## A loose copse of trees rather than one standalone tree — real clearings

@@ -14,15 +14,16 @@ extends RefCounted
 const HALF_EXTENT := 50.0
 const CELL_SIZE := 1.0
 
-## Flattened by request ("hills almost all around the starting map, remove
-## it") — set back to 0.0. clamp_slopes()/MAX_SLOPE_DEGREES below become
-## no-ops at this amplitude (every height is already 0, nothing to clamp),
-## but are kept intact rather than special-cased/removed, same "disable via
-## constant, keep the code" pattern used throughout Arena.gd (see e.g.
-## STRUCTURE_COUNT_MIN/MAX) — trivial to bring hills back later by bumping
-## this back up.
+## By request, superseding the earlier "flatten by request" pass: amplitude
+## is now randomized per match within this range (see generate()'s
+## composition_rng) instead of a fixed constant, so every seed's terrain
+## actually feels different, not just differently-placed props on the same
+## silhouette. clamp_slopes()/MAX_SLOPE_DEGREES stay correct at any rolled
+## amplitude — they bound worst-case slope regardless of how tall the noise
+## itself is.
+const NOISE_AMPLITUDE_MIN := 2.0
+const NOISE_AMPLITUDE_MAX := 16.0
 const NOISE_FREQUENCY := 0.025
-const NOISE_AMPLITUDE := 0.0
 const FRACTAL_OCTAVES := 3
 const FRACTAL_GAIN := 0.4
 
@@ -67,9 +68,18 @@ const RIDGE_HEIGHT := 20.0
 ## wouldn't actually read as height-based color on the terrain's primary
 ## visible surface. Vertex colors sidestep that entirely and need no UVs.
 ## Arena.gd just sets `StandardMaterial3D.vertex_color_use_as_albedo = true`.
-const COLOR_LOW := Color(0.16, 0.14, 0.09)   # dark loam, low ground
-const COLOR_MID := Color(0.32, 0.42, 0.18)   # mossy green, mid elevation
-const COLOR_HIGH := Color(0.55, 0.53, 0.48)  # pale rock, peaks
+##
+## One of these low/mid/high triples is picked per match (see generate()'s
+## composition_rng) instead of always using the first ("lush") one, so
+## different seeds read as different biomes, not just reshuffled props on
+## the same green ground.
+const BIOME_PALETTES: Array[Array] = [
+	[Color(0.16, 0.14, 0.09), Color(0.32, 0.42, 0.18), Color(0.55, 0.53, 0.48)],  # lush: loam -> moss -> pale rock
+	[Color(0.25, 0.14, 0.05), Color(0.45, 0.28, 0.08), Color(0.60, 0.52, 0.40)],  # autumn: dark earth -> rust -> sandstone
+	[Color(0.30, 0.24, 0.16), Color(0.48, 0.40, 0.26), Color(0.65, 0.60, 0.50)],  # arid: dry dirt -> scrub -> bleached rock
+	[Color(0.22, 0.22, 0.20), Color(0.40, 0.40, 0.38), Color(0.85, 0.85, 0.88)],  # tundra: cold soil -> frost -> snow
+	[Color(0.10, 0.09, 0.09), Color(0.24, 0.20, 0.18), Color(0.45, 0.38, 0.32)],  # volcanic: ash -> cinder -> scorched stone
+]
 
 ## Fine-grained color speckling on top of the height gradient above — by
 ## request, the ground looked "a bit poor" (flat/plasticky) even with the
@@ -88,12 +98,33 @@ var depth: int
 var heights: PackedFloat32Array
 var _detail_noise: FastNoiseLite
 
+## Rolled once per generate() call — see NOISE_AMPLITUDE_MIN/MAX and
+## BIOME_PALETTES above.
+var amplitude: float
+var color_low: Color
+var color_mid: Color
+var color_high: Color
+
 
 func generate(rng_seed: int, spawn_positions: Array) -> void:
 	width = int(HALF_EXTENT * 2.0 / CELL_SIZE) + 1
 	depth = width
 	heights = PackedFloat32Array()
 	heights.resize(width * depth)
+
+	# Dedicated RNG, offset +2 (distinct from the height noise's bare
+	# rng_seed and the detail noise's +1), purely for per-match composition
+	# rolls (amplitude, biome palette) — kept separate from Arena.gd's own
+	# _rng so this doesn't perturb that RNG's already-verified draw order.
+	# Same seed on every peer (see generate_arena()'s doc comment on
+	# Arena.gd) means every peer rolls the identical amplitude/palette too.
+	var composition_rng := RandomNumberGenerator.new()
+	composition_rng.seed = rng_seed + 2
+	amplitude = composition_rng.randf_range(NOISE_AMPLITUDE_MIN, NOISE_AMPLITUDE_MAX)
+	var palette: Array = BIOME_PALETTES[composition_rng.randi_range(0, BIOME_PALETTES.size() - 1)]
+	color_low = palette[0]
+	color_mid = palette[1]
+	color_high = palette[2]
 
 	# Different seed offset than the height noise below so the two don't
 	# visually correlate (a speckle pattern that tracked hills 1:1 would
@@ -114,7 +145,7 @@ func generate(rng_seed: int, spawn_positions: Array) -> void:
 		for i in range(width):
 			var x := _grid_to_world_x(i)
 			var z := _grid_to_world_z(j)
-			heights[_idx(i, j)] = noise.get_noise_2d(x, z) * NOISE_AMPLITUDE
+			heights[_idx(i, j)] = noise.get_noise_2d(x, z) * amplitude
 
 	_flatten_border()
 	# Spawn markers are static y=1 Node3Ds baked into the arena scene (not
@@ -289,13 +320,15 @@ func get_height(x: float, z: float) -> float:
 ## areas don't read as a single flat color band.
 func _height_color(h: float, x: float, z: float) -> Color:
 	var base: Color
-	# NOISE_AMPLITUDE == 0 (flat ground) would divide by zero below — every
-	# height is exactly 0 in that case anyway, so just use the mid color.
-	if NOISE_AMPLITUDE <= 0.001:
-		base = COLOR_MID
+	# amplitude == 0 (flat ground) would divide by zero below — every height
+	# is exactly 0 in that case anyway, so just use the mid color. Rolled
+	# amplitude never actually hits exactly 0 (see NOISE_AMPLITUDE_MIN), but
+	# the guard is kept since it's a real edge case, not a hypothetical one.
+	if amplitude <= 0.001:
+		base = color_mid
 	else:
-		var t: float = clamp((h + NOISE_AMPLITUDE) / (2.0 * NOISE_AMPLITUDE), 0.0, 1.0)
-		base = COLOR_LOW.lerp(COLOR_MID, t / 0.5) if t < 0.5 else COLOR_MID.lerp(COLOR_HIGH, (t - 0.5) / 0.5)
+		var t: float = clamp((h + amplitude) / (2.0 * amplitude), 0.0, 1.0)
+		base = color_low.lerp(color_mid, t / 0.5) if t < 0.5 else color_mid.lerp(color_high, (t - 0.5) / 0.5)
 
 	var jitter: float = _detail_noise.get_noise_2d(x, z) * DETAIL_COLOR_JITTER
 	return Color(
